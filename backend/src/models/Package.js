@@ -31,8 +31,7 @@ const packageSchema = new mongoose.Schema(
     
     maxAmount: {
       type: mongoose.Schema.Types.Decimal128,
-      required: true,
-      get: (v) => parseFloat(v.toString()),
+      get: (v) => v ? parseFloat(v.toString()) : null,
     },
     
     incrementStep: {
@@ -50,6 +49,7 @@ const packageSchema = new mongoose.Schema(
     roiCap: {
       type: Number,
       required: true,
+      default: 200,
     },
     
     duration: {
@@ -129,8 +129,8 @@ const packageSchema = new mongoose.Schema(
   }
 );
 
-// ==================== INDEXES ====================
-packageSchema.index({ packageCode: 1 }, { unique: true });
+// Indexes
+packageSchema.index({ packageCode: 1 });
 packageSchema.index({ isActive: 1, isVisible: 1 });
 packageSchema.index({ displayOrder: 1 });
 
