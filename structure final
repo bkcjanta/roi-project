@@ -1,0 +1,589 @@
+investment-platform/
+│
+├── .gitignore
+├── .env.example
+├── README.md
+├── docker-compose.yml
+├── package.json (workspace root)
+│
+├── frontend/                                    # Next.js 15 App
+│   ├── .env.local.example
+│   ├── .eslintrc.json
+│   ├── .gitignore
+│   ├── next.config.js
+│   ├── package.json
+│   ├── postcss.config.js
+│   ├── tailwind.config.js
+│   ├── tsconfig.json
+│   │
+│   ├── public/
+│   │   ├── images/
+│   │   │   ├── logo.png
+│   │   │   ├── hero-bg.jpg
+│   │   │   └── avatars/
+│   │   ├── icons/
+│   │   └── fonts/
+│   │
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── layout.jsx                      # Root layout
+│   │   │   ├── page.jsx                        # Landing page
+│   │   │   ├── providers.jsx                   # Redux + Theme providers
+│   │   │   ├── globals.css
+│   │   │   │
+│   │   │   ├── (auth)/                         # Auth routes group
+│   │   │   │   ├── layout.jsx
+│   │   │   │   ├── login/
+│   │   │   │   │   └── page.jsx
+│   │   │   │   ├── register/
+│   │   │   │   │   └── page.jsx
+│   │   │   │   ├── forgot-password/
+│   │   │   │   │   └── page.jsx
+│   │   │   │   ├── reset-password/
+│   │   │   │   │   └── [token]/
+│   │   │   │   │       └── page.jsx
+│   │   │   │   ├── verify-email/
+│   │   │   │   │   └── [token]/
+│   │   │   │   │       └── page.jsx
+│   │   │   │   └── verify-otp/
+│   │   │   │       └── page.jsx
+│   │   │   │
+│   │   │   ├── (marketing)/                    # Public pages
+│   │   │   │   ├── layout.jsx
+│   │   │   │   ├── about/
+│   │   │   │   │   └── page.jsx
+│   │   │   │   ├── how-it-works/
+│   │   │   │   │   └── page.jsx
+│   │   │   │   ├── packages/
+│   │   │   │   │   └── page.jsx
+│   │   │   │   ├── contact/
+│   │   │   │   │   └── page.jsx
+│   │   │   │   └── faq/
+│   │   │   │       └── page.jsx
+│   │   │   │
+│   │   │   ├── (dashboard)/                    # User Dashboard
+│   │   │   │   ├── layout.jsx
+│   │   │   │   ├── dashboard/
+│   │   │   │   │   ├── page.jsx                # Overview
+│   │   │   │   │   └── loading.jsx
+│   │   │   │   │
+│   │   │   │   ├── wallet/
+│   │   │   │   │   ├── page.jsx
+│   │   │   │   │   ├── deposit/
+│   │   │   │   │   │   └── page.jsx
+│   │   │   │   │   ├── withdraw/
+│   │   │   │   │   │   └── page.jsx
+│   │   │   │   │   └── transfer/
+│   │   │   │   │       └── page.jsx
+│   │   │   │   │
+│   │   │   │   ├── investments/
+│   │   │   │   │   ├── page.jsx
+│   │   │   │   │   ├── packages/
+│   │   │   │   │   │   └── page.jsx
+│   │   │   │   │   ├── [id]/
+│   │   │   │   │   │   └── page.jsx
+│   │   │   │   │   └── history/
+│   │   │   │   │       └── page.jsx
+│   │   │   │   │
+│   │   │   │   ├── transactions/
+│   │   │   │   │   ├── page.jsx
+│   │   │   │   │   └── [id]/
+│   │   │   │   │       └── page.jsx
+│   │   │   │   │
+│   │   │   │   ├── income/
+│   │   │   │   │   ├── page.jsx                # Income overview
+│   │   │   │   │   ├── referral/
+│   │   │   │   │   │   └── page.jsx
+│   │   │   │   │   ├── level/
+│   │   │   │   │   │   └── page.jsx
+│   │   │   │   │   └── binary/
+│   │   │   │   │       └── page.jsx
+│   │   │   │   │
+│   │   │   │   ├── team/
+│   │   │   │   │   ├── page.jsx                # Referral list
+│   │   │   │   │   ├── network/
+│   │   │   │   │   │   └── page.jsx            # Binary tree
+│   │   │   │   │   └── genealogy/
+│   │   │   │   │       └── page.jsx
+│   │   │   │   │
+│   │   │   │   ├── profile/
+│   │   │   │   │   ├── page.jsx
+│   │   │   │   │   ├── edit/
+│   │   │   │   │   │   └── page.jsx
+│   │   │   │   │   ├── security/
+│   │   │   │   │   │   └── page.jsx
+│   │   │   │   │   └── kyc/
+│   │   │   │   │       └── page.jsx
+│   │   │   │   │
+│   │   │   │   ├── notifications/
+│   │   │   │   │   └── page.jsx
+│   │   │   │   │
+│   │   │   │   └── support/
+│   │   │   │       ├── page.jsx
+│   │   │   │       ├── create/
+│   │   │   │       │   └── page.jsx
+│   │   │   │       └── [ticketId]/
+│   │   │   │           └── page.jsx
+│   │   │   │
+│   │   │   └── (admin)/                        # Admin Dashboard
+│   │   │       ├── layout.jsx
+│   │   │       ├── admin/
+│   │   │       │   ├── page.jsx                # Admin overview
+│   │   │       │   │
+│   │   │       │   ├── users/
+│   │   │       │   │   ├── page.jsx
+│   │   │       │   │   └── [userId]/
+│   │   │       │   │       ├── page.jsx
+│   │   │       │   │       └── edit/
+│   │   │       │   │           └── page.jsx
+│   │   │       │   │
+│   │   │       │   ├── packages/
+│   │   │       │   │   ├── page.jsx
+│   │   │       │   │   ├── create/
+│   │   │       │   │   │   └── page.jsx
+│   │   │       │   │   └── [id]/
+│   │   │       │   │       └── edit/
+│   │   │       │   │           └── page.jsx
+│   │   │       │   │
+│   │   │       │   ├── investments/
+│   │   │       │   │   ├── page.jsx
+│   │   │       │   │   └── [id]/
+│   │   │       │   │       └── page.jsx
+│   │   │       │   │
+│   │   │       │   ├── transactions/
+│   │   │       │   │   ├── page.jsx
+│   │   │       │   │   └── [id]/
+│   │   │       │   │       └── page.jsx
+│   │   │       │   │
+│   │   │       │   ├── withdrawals/
+│   │   │       │   │   ├── page.jsx
+│   │   │       │   │   ├── pending/
+│   │   │       │   │   │   └── page.jsx
+│   │   │       │   │   └── [id]/
+│   │   │       │   │       └── page.jsx
+│   │   │       │   │
+│   │   │       │   ├── kyc/
+│   │   │       │   │   ├── page.jsx
+│   │   │       │   │   ├── pending/
+│   │   │       │   │   │   └── page.jsx
+│   │   │       │   │   └── [userId]/
+│   │   │       │   │       └── page.jsx
+│   │   │       │   │
+│   │   │       │   ├── income-control/
+│   │   │       │   │   ├── page.jsx
+│   │   │       │   │   ├── referral/
+│   │   │       │   │   │   └── page.jsx
+│   │   │       │   │   ├── level/
+│   │   │       │   │   │   └── page.jsx
+│   │   │       │   │   └── binary/
+│   │   │       │   │       └── page.jsx
+│   │   │       │   │
+│   │   │       │   ├── roi-control/
+│   │   │       │   │   ├── page.jsx
+│   │   │       │   │   ├── daily/
+│   │   │       │   │   │   └── page.jsx
+│   │   │       │   │   └── staking/
+│   │   │       │   │       └── page.jsx
+│   │   │       │   │
+│   │   │       │   ├── cron-jobs/
+│   │   │       │   │   └── page.jsx
+│   │   │       │   │
+│   │   │       │   ├── support-tickets/
+│   │   │       │   │   ├── page.jsx
+│   │   │       │   │   └── [ticketId]/
+│   │   │       │   │       └── page.jsx
+│   │   │       │   │
+│   │   │       │   ├── reports/
+│   │   │       │   │   ├── page.jsx
+│   │   │       │   │   ├── financial/
+│   │   │       │   │   │   └── page.jsx
+│   │   │       │   │   ├── users/
+│   │   │       │   │   │   └── page.jsx
+│   │   │       │   │   └── transactions/
+│   │   │       │   │       └── page.jsx
+│   │   │       │   │
+│   │   │       │   ├── audit-logs/
+│   │   │       │   │   └── page.jsx
+│   │   │       │   │
+│   │   │       │   └── settings/
+│   │   │       │       ├── page.jsx
+│   │   │       │       ├── general/
+│   │   │       │       │   └── page.jsx
+│   │   │       │       ├── security/
+│   │   │       │       │   └── page.jsx
+│   │   │       │       └── notifications/
+│   │   │       │           └── page.jsx
+│   │   │       │
+│   │   │       └── api/                        # API routes (if needed)
+│   │   │           └── test/
+│   │   │               └── route.js
+│   │   │
+│   │   ├── components/
+│   │   │   ├── landing/
+│   │   │   │   ├── Hero.jsx
+│   │   │   │   ├── Features.jsx
+│   │   │   │   ├── HowItWorks.jsx
+│   │   │   │   ├── Packages.jsx
+│   │   │   │   ├── Testimonials.jsx
+│   │   │   │   ├── Stats.jsx
+│   │   │   │   ├── FAQ.jsx
+│   │   │   │   ├── TrustSection.jsx
+│   │   │   │   └── CallToAction.jsx
+│   │   │   │
+│   │   │   ├── auth/
+│   │   │   │   ├── LoginForm.jsx
+│   │   │   │   ├── RegisterForm.jsx
+│   │   │   │   ├── ForgotPasswordForm.jsx
+│   │   │   │   ├── ResetPasswordForm.jsx
+│   │   │   │   └── OTPInput.jsx
+│   │   │   │
+│   │   │   ├── dashboard/
+│   │   │   │   ├── Overview.jsx
+│   │   │   │   ├── StatsGrid.jsx
+│   │   │   │   ├── StatCard.jsx
+│   │   │   │   ├── RecentActivity.jsx
+│   │   │   │   ├── QuickActions.jsx
+│   │   │   │   ├── EarningsChart.jsx
+│   │   │   │   ├── TransactionTable.jsx
+│   │   │   │   ├── InvestmentCard.jsx
+│   │   │   │   ├── PackageCard.jsx
+│   │   │   │   ├── WalletCard.jsx
+│   │   │   │   ├── IncomeBreakdown.jsx
+│   │   │   │   ├── BinaryTreeVisualization.jsx
+│   │   │   │   ├── ReferralLink.jsx
+│   │   │   │   ├── TeamStats.jsx
+│   │   │   │   └── NetworkTable.jsx
+│   │   │   │
+│   │   │   ├── admin/
+│   │   │   │   ├── AdminStats.jsx
+│   │   │   │   ├── UsersTable.jsx
+│   │   │   │   ├── UserDetails.jsx
+│   │   │   │   ├── PackagesTable.jsx
+│   │   │   │   ├── PackageForm.jsx
+│   │   │   │   ├── TransactionsTable.jsx
+│   │   │   │   ├── WithdrawalQueue.jsx
+│   │   │   │   ├── ApprovalModal.jsx
+│   │   │   │   ├── KYCReview.jsx
+│   │   │   │   ├── ROISettings.jsx
+│   │   │   │   ├── IncomeSettings.jsx
+│   │   │   │   ├── CronJobList.jsx
+│   │   │   │   ├── ManualTrigger.jsx
+│   │   │   │   └── SystemHealth.jsx
+│   │   │   │
+│   │   │   ├── forms/
+│   │   │   │   ├── InvestmentForm.jsx
+│   │   │   │   ├── DepositForm.jsx
+│   │   │   │   ├── WithdrawForm.jsx
+│   │   │   │   ├── TransferForm.jsx
+│   │   │   │   ├── ProfileForm.jsx
+│   │   │   │   ├── BankDetailsForm.jsx
+│   │   │   │   ├── KYCUploadForm.jsx
+│   │   │   │   ├── TicketForm.jsx
+│   │   │   │   └── PasswordChangeForm.jsx
+│   │   │   │
+│   │   │   ├── shared/
+│   │   │   │   ├── Navbar.jsx
+│   │   │   │   ├── Footer.jsx
+│   │   │   │   ├── Sidebar.jsx
+│   │   │   │   ├── DashboardLayout.jsx
+│   │   │   │   ├── AdminSidebar.jsx
+│   │   │   │   ├── ProtectedRoute.jsx
+│   │   │   │   ├── LoadingSpinner.jsx
+│   │   │   │   ├── ErrorBoundary.jsx
+│   │   │   │   ├── Modal.jsx
+│   │   │   │   ├── Toast.jsx
+│   │   │   │   ├── Pagination.jsx
+│   │   │   │   ├── SearchBar.jsx
+│   │   │   │   ├── FilterBar.jsx
+│   │   │   │   ├── DataTable.jsx
+│   │   │   │   ├── EmptyState.jsx
+│   │   │   │   └── ConfirmDialog.jsx
+│   │   │   │
+│   │   │   └── ui/                             # shadcn/ui components
+│   │   │       ├── button.jsx
+│   │   │       ├── input.jsx
+│   │   │       ├── card.jsx
+│   │   │       ├── dialog.jsx
+│   │   │       ├── dropdown-menu.jsx
+│   │   │       ├── table.jsx
+│   │   │       ├── toast.jsx
+│   │   │       ├── select.jsx
+│   │   │       ├── badge.jsx
+│   │   │       ├── tabs.jsx
+│   │   │       ├── accordion.jsx
+│   │   │       ├── alert.jsx
+│   │   │       ├── avatar.jsx
+│   │   │       ├── checkbox.jsx
+│   │   │       ├── label.jsx
+│   │   │       ├── separator.jsx
+│   │   │       ├── skeleton.jsx
+│   │   │       ├── switch.jsx
+│   │   │       ├── textarea.jsx
+│   │   │       └── tooltip.jsx
+│   │   │
+│   │   ├── redux/
+│   │   │   ├── store.js
+│   │   │   ├── hooks.js                        # useAppDispatch, useAppSelector
+│   │   │   │
+│   │   │   ├── slices/
+│   │   │   │   ├── authSlice.js
+│   │   │   │   ├── walletSlice.js
+│   │   │   │   ├── investmentSlice.js
+│   │   │   │   ├── transactionSlice.js
+│   │   │   │   ├── incomeSlice.js
+│   │   │   │   ├── notificationSlice.js
+│   │   │   │   └── uiSlice.js
+│   │   │   │
+│   │   │   └── api/
+│   │   │       ├── apiSlice.js                 # RTK Query base
+│   │   │       ├── authApi.js
+│   │   │       ├── walletApi.js
+│   │   │       ├── investmentApi.js
+│   │   │       ├── transactionApi.js
+│   │   │       ├── incomeApi.js
+│   │   │       ├── withdrawalApi.js
+│   │   │       ├── kycApi.js
+│   │   │       ├── notificationApi.js
+│   │   │       ├── supportApi.js
+│   │   │       ├── userApi.js
+│   │   │       └── adminApi.js
+│   │   │
+│   │   ├── lib/
+│   │   │   ├── axios.js                        # Axios instance + interceptors
+│   │   │   ├── utils.js                        # Utility functions
+│   │   │   ├── constants.js
+│   │   │   ├── formatters.js                   # Date, currency formatters
+│   │   │   ├── validators.js                   # Custom validators
+│   │   │   └── cn.js                           # Tailwind class merger
+│   │   │
+│   │   ├── hooks/
+│   │   │   ├── useAuth.js
+│   │   │   ├── useWallet.js
+│   │   │   ├── useInvestment.js
+│   │   │   ├── useNotification.js
+│   │   │   ├── useDebounce.js
+│   │   │   ├── useLocalStorage.js
+│   │   │   └── useMediaQuery.js
+│   │   │
+│   │   ├── styles/
+│   │   │   └── globals.css
+│   │   │
+│   │   └── types/                              # TypeScript types
+│   │       ├── user.types.ts
+│   │       ├── wallet.types.ts
+│   │       ├── investment.types.ts
+│   │       └── api.types.ts
+│   │
+│   └── .next/                                  # Build output (gitignored)
+│
+│
+├── backend/                                     # Node.js + Express API
+│   ├── .env.example
+│   ├── .eslintrc.json
+│   ├── .gitignore
+│   ├── package.json
+│   ├── nodemon.json
+│   │
+│   ├── src/
+│   │   ├── config/
+│   │   │   ├── database.js                     # MongoDB connection
+│   │   │   ├── redis.js                        # Redis connection
+│   │   │   ├── environment.js                  # Environment variables
+│   │   │   ├── jwt.js                          # JWT configuration
+│   │   │   ├── aws.js                          # AWS S3 config
+│   │   │   ├── email.js                        # Email service config
+│   │   │   ├── sms.js                          # SMS service config
+│   │   │   └── constants.js                    # App constants
+│   │   │
+│   │   ├── models/
+│   │   │   ├── User.js                         # User schema
+│   │   │   ├── Wallet.js                       # Wallet schema (7 types)
+│   │   │   ├── Transaction.js                  # Transaction schema
+│   │   │   ├── Investment.js                   # Investment schema
+│   │   │   ├── Package.js                      # Investment package schema
+│   │   │   ├── Income.js                       # Income schema (all types)
+│   │   │   ├── BinaryTree.js                   # Binary tree structure
+│   │   │   ├── Withdrawal.js                   # Withdrawal request schema
+│   │   │   ├── KYCDocument.js                  # KYC verification schema
+│   │   │   ├── Notification.js                 # Notification schema
+│   │   │   ├── SupportTicket.js                # Support ticket schema
+│   │   │   ├── AuditLog.js                     # Audit log schema
+│   │   │   ├── CronJob.js                      # Cron job tracking schema
+│   │   │   └── SystemSetting.js                # System settings schema
+│   │   │
+│   │   ├── controllers/
+│   │   │   ├── auth.controller.js              # Auth endpoints
+│   │   │   ├── user.controller.js              # User profile endpoints
+│   │   │   ├── wallet.controller.js            # Wallet operations
+│   │   │   ├── investment.controller.js        # Investment operations
+│   │   │   ├── transaction.controller.js       # Transaction history
+│   │   │   ├── income.controller.js            # Income endpoints
+│   │   │   ├── withdrawal.controller.js        # Withdrawal requests
+│   │   │   ├── kyc.controller.js               # KYC submission/review
+│   │   │   ├── notification.controller.js      # Notifications
+│   │   │   ├── support.controller.js           # Support tickets
+│   │   │   └── admin.controller.js             # Admin operations
+│   │   │
+│   │   ├── services/
+│   │   │   ├── auth.service.js                 # Auth business logic
+│   │   │   ├── wallet.service.js               # Wallet business logic
+│   │   │   ├── investment.service.js           # Investment business logic
+│   │   │   ├── roi.service.js                  # ROI calculation logic
+│   │   │   ├── income.service.js               # Income distribution logic
+│   │   │   ├── referral.service.js             # Referral income logic
+│   │   │   ├── level.service.js                # Level income logic
+│   │   │   ├── binaryTree.service.js           # Binary tree operations
+│   │   │   ├── binaryIncome.service.js         # Binary income calculation
+│   │   │   ├── withdrawal.service.js           # Withdrawal processing
+│   │   │   ├── kyc.service.js                  # KYC processing
+│   │   │   ├── notification.service.js         # Notification creation
+│   │   │   ├── email.service.js                # Email sending
+│   │   │   ├── sms.service.js                  # SMS sending
+│   │   │   ├── upload.service.js               # File upload (S3/Cloudinary)
+│   │   │   └── transaction.service.js          # Transaction logging
+│   │   │
+│   │   ├── middleware/
+│   │   │   ├── auth.middleware.js              # JWT verification
+│   │   │   ├── rbac.middleware.js              # Role-based access control
+│   │   │   ├── validation.middleware.js        # Request validation
+│   │   │   ├── rateLimit.middleware.js         # Rate limiting
+│   │   │   ├── idempotency.middleware.js       # Prevent duplicate requests
+│   │   │   ├── audit.middleware.js             # Audit logging
+│   │   │   ├── helmet.middleware.js            # Security headers
+│   │   │   ├── cors.middleware.js              # CORS configuration
+│   │   │   ├── sanitize.middleware.js          # Input sanitization
+│   │   │   ├── errorHandler.middleware.js      # Global error handler
+│   │   │   └── logger.middleware.js            # Request logging
+│   │   │
+│   │   ├── routes/
+│   │   │   ├── index.js                        # Main router
+│   │   │   ├── auth.routes.js
+│   │   │   ├── user.routes.js
+│   │   │   ├── wallet.routes.js
+│   │   │   ├── investment.routes.js
+│   │   │   ├── transaction.routes.js
+│   │   │   ├── income.routes.js
+│   │   │   ├── withdrawal.routes.js
+│   │   │   ├── kyc.routes.js
+│   │   │   ├── notification.routes.js
+│   │   │   ├── support.routes.js
+│   │   │   └── admin.routes.js
+│   │   │
+│   │   ├── validators/
+│   │   │   ├── auth.validator.js               # Joi schemas for auth
+│   │   │   ├── user.validator.js
+│   │   │   ├── wallet.validator.js
+│   │   │   ├── investment.validator.js
+│   │   │   ├── transaction.validator.js
+│   │   │   ├── withdrawal.validator.js
+│   │   │   ├── kyc.validator.js
+│   │   │   └── support.validator.js
+│   │   │
+│   │   ├── cron/
+│   │   │   ├── cronManager.js                  # Cron job orchestrator
+│   │   │   ├── dailyROI.cron.js                # Daily ROI distribution
+│   │   │   ├── stakingROI.cron.js              # Staking ROI distribution
+│   │   │   ├── referralIncome.cron.js          # Referral income processing
+│   │   │   ├── levelIncome.cron.js             # Level income distribution
+│   │   │   ├── binaryIncome.cron.js            # Binary income calculation
+│   │   │   ├── cleanup.cron.js                 # Data cleanup
+│   │   │   └── notifications.cron.js           # Scheduled notifications
+│   │   │
+│   │   ├── utils/
+│   │   │   ├── logger.js                       # Winston logger
+│   │   │   ├── encryption.js                   # AES-256 encryption
+│   │   │   ├── hash.js                         # bcrypt hashing
+│   │   │   ├── jwt.js                          # JWT utilities
+│   │   │   ├── idGenerator.js                  # UUID, userCode, referralCode
+│   │   │   ├── validator.js                    # Custom validators
+│   │   │   ├── response.js                     # API response formatter
+│   │   │   ├── errorHandler.js                 # Error handling utilities
+│   │   │   ├── dateUtils.js                    # Date utilities
+│   │   │   ├── mathUtils.js                    # ROI calculations
+│   │   │   └── asyncHandler.js                 # Async error wrapper
+│   │   │
+│   │   ├── database/
+│   │   │   ├── seeders/
+│   │   │   │   ├── index.js                    # Seed runner
+│   │   │   │   ├── admin.seeder.js             # Admin user
+│   │   │   │   ├── packages.seeder.js          # Sample packages
+│   │   │   │   └── settings.seeder.js          # Default settings
+│   │   │   │
+│   │   │   └── indexes/
+│   │   │       └── createIndexes.js            # Database indexes
+│   │   │
+│   │   ├── templates/
+│   │   │   ├── emails/
+│   │   │   │   ├── welcome.html
+│   │   │   │   ├── otp.html
+│   │   │   │   ├── passwordReset.html
+│   │   │   │   ├── investmentConfirmation.html
+│   │   │   │   ├── withdrawalApproved.html
+│   │   │   │   └── kycApproved.html
+│   │   │   │
+│   │   │   └── sms/
+│   │   │       ├── otp.txt
+│   │   │       └── notification.txt
+│   │   │
+│   │   ├── tests/
+│   │   │   ├── setup.js
+│   │   │   ├── unit/
+│   │   │   │   ├── models/
+│   │   │   │   │   └── User.test.js
+│   │   │   │   ├── services/
+│   │   │   │   │   └── wallet.service.test.js
+│   │   │   │   └── utils/
+│   │   │   │       └── encryption.test.js
+│   │   │   │
+│   │   │   ├── integration/
+│   │   │   │   ├── auth.test.js
+│   │   │   │   ├── wallet.test.js
+│   │   │   │   └── investment.test.js
+│   │   │   │
+│   │   │   └── e2e/
+│   │   │       └── completeFlow.test.js
+│   │   │
+│   │   ├── app.js                              # Express app setup
+│   │   └── server.js                           # Server entry point
+│   │
+│   ├── logs/                                   # Log files (gitignored)
+│   │   ├── error.log
+│   │   ├── combined.log
+│   │   └── audit.log
+│   │
+│   └── uploads/                                # Temporary uploads (gitignored)
+│       └── .gitkeep
+│
+│
+├── docs/
+│   ├── README.md
+│   ├── SETUP.md                                # Setup instructions
+│   ├── API.md                                  # API documentation
+│   ├── DATABASE.md                             # Database schema docs
+│   ├── DEPLOYMENT.md                           # Deployment guide
+│   ├── SECURITY.md                             # Security practices
+│   ├── CRON.md                                 # Cron job documentation
+│   ├── TROUBLESHOOTING.md                      # Common issues & fixes
+│   └── CHANGELOG.md                            # Version history
+│
+│
+├── scripts/
+│   ├── setup.sh                                # Initial setup script
+│   ├── deploy.sh                               # Deployment script
+│   ├── backup.sh                               # Database backup
+│   ├── restore.sh                              # Database restore
+│   └── seed.sh                                 # Run seeders
+│
+│
+└── .github/                                    # GitHub specific
+    ├── workflows/
+    │   ├── backend-ci.yml                      # Backend CI/CD
+    │   ├── frontend-ci.yml                     # Frontend CI/CD
+    │   ├── test.yml                            # Run tests
+    │   └── deploy.yml                          # Deploy to production
+    │
+    ├── ISSUE_TEMPLATE/
+    │   ├── bug_report.md
+    │   └── feature_request.md
+    │
+    └── PULL_REQUEST_TEMPLATE.md
