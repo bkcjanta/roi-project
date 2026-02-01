@@ -7,9 +7,8 @@ const userSchema = new mongoose.Schema(
     userCode: {
       type: String,
       unique: true,
-      required: true,
       uppercase: true,
-      // Format: USR000001
+      sparse: true, // Allow null for unique index
     },
     
     email: {
@@ -56,18 +55,14 @@ const userSchema = new mongoose.Schema(
       },
     },
     
-    dateOfBirth: {
-      type: Date,
-    },
+    dateOfBirth: Date,
     
     gender: {
       type: String,
       enum: ['male', 'female', 'other'],
     },
     
-    profilePicture: {
-      type: String,
-    },
+    profilePicture: String,
     
     // Address
     address: {
@@ -103,8 +98,8 @@ const userSchema = new mongoose.Schema(
     referralCode: {
       type: String,
       unique: true,
-      required: true,
       uppercase: true,
+      sparse: true,
     },
     
     referredBy: {
@@ -112,14 +107,18 @@ const userSchema = new mongoose.Schema(
       ref: 'User',
     },
     
-    sponsorCode: {
-      type: String,
-      uppercase: true,
+    sponsorCode: String,
+    
+    totalDirectReferrals: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
     
-    placementPosition: {
-      type: String,
-      enum: ['left', 'right'],
+    totalTeamSize: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
     
     // Security & Access
@@ -134,8 +133,6 @@ const userSchema = new mongoose.Schema(
       enum: ['pending', 'submitted', 'under_review', 'approved', 'rejected'],
       default: 'pending',
     },
-    
-    kycRejectionReason: String,
     
     isActive: {
       type: Boolean,
@@ -158,57 +155,16 @@ const userSchema = new mongoose.Schema(
       default: 'active',
     },
     
-    // Fraud Detection
-    ipAddresses: [
-      {
-        ip: String,
-        timestamp: Date,
-        action: String,
-      },
-    ],
-    
-    deviceFingerprints: [String],
-    
+    // Security Tracking
     lastLogin: Date,
     lastLoginIp: String,
+    
     failedLoginAttempts: {
       type: Number,
       default: 0,
     },
+    
     lockedUntil: Date,
-    
-    // MFA
-    mfaSecret: String,
-    mfaEnabled: {
-      type: Boolean,
-      default: false,
-    },
-    
-    // Preferences
-    notificationSettings: {
-      email: {
-        type: Boolean,
-        default: true,
-      },
-      sms: {
-        type: Boolean,
-        default: true,
-      },
-      push: {
-        type: Boolean,
-        default: true,
-      },
-    },
-    
-    language: {
-      type: String,
-      default: 'en',
-    },
-    
-    timezone: {
-      type: String,
-      default: 'Asia/Kolkata',
-    },
     
     // Wallet References
     wallets: {
@@ -229,10 +185,6 @@ const userSchema = new mongoose.Schema(
     // Metadata
     registrationIp: String,
     registrationDevice: String,
-    version: {
-      type: Number,
-      default: 0,
-    },
   },
   {
     timestamps: true,
@@ -241,20 +193,15 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// ==================== INDEXES ====================
-userSchema.index({ email: 1 }, { unique: true });
-userSchema.index({ mobile: 1 }, { unique: true });
-userSchema.index({ userCode: 1 }, { unique: true });
-userSchema.index({ referralCode: 1 }, { unique: true });
-userSchema.index({ referredBy: 1 });
-userSchema.index({ kycStatus: 1, isActive: 1 });
-userSchema.index({ createdAt: -1 });
+// Indexes (removed duplicate definitions)
+userSchema.index({ email: 1 });
+userSchema.index({ mobile: 1 });
+userSchema.index({ userCode: 1 });
+userSchema.index({ referralCode: 1 });
 
-// ==================== PRE-SAVE MIDDLEWARE ====================
+// Pre-save: Hash password
 userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) {
-    return next();
-  }
+  if (!this.isModified('password')) return next();
 
   try {
     const salt = await bcrypt.genSalt(12);
@@ -265,37 +212,21 @@ userSchema.pre('save', async function (next) {
   }
 });
 
-// Generate userCode
-userSchema.pre('save', async function (next) {
-  if (!this.userCode) {
-    const count = await mongoose.model('User').countDocuments();
-    this.userCode = `USR${String(count + 1).padStart(6, '0')}`;
-  }
-  next();
-});
-
-// Generate referralCode
-userSchema.pre('save', function (next) {
-  if (!this.referralCode) {
-    this.referralCode = `REF${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
-  }
-  next();
-});
-
-// ==================== METHODS ====================
+// Method: Compare password
 userSchema.methods.comparePassword = async function (candidatePassword) {
-  try {
-    return await bcrypt.compare(candidatePassword, this.password);
-  } catch (error) {
-    throw new Error('Password comparison failed');
-  }
+  return await bcrypt.compare(candidatePassword, this.password);
 };
 
+// Method: Check if account is locked
 userSchema.methods.isLocked = function () {
   return !!(this.lockedUntil && this.lockedUntil > Date.now());
 };
 
+// Method: Increment login attempts
 userSchema.methods.incrementLoginAttempts = async function () {
+  const maxAttempts = 5;
+  const lockTime = 2 * 60 * 60 * 1000; // 2 hours
+
   if (this.lockedUntil && this.lockedUntil < Date.now()) {
     return this.updateOne({
       $set: { failedLoginAttempts: 1 },
@@ -304,8 +235,6 @@ userSchema.methods.incrementLoginAttempts = async function () {
   }
 
   const updates = { $inc: { failedLoginAttempts: 1 } };
-  const maxAttempts = 5;
-  const lockTime = 2 * 60 * 60 * 1000;
 
   if (this.failedLoginAttempts + 1 >= maxAttempts && !this.isLocked()) {
     updates.$set = { lockedUntil: Date.now() + lockTime };
@@ -314,6 +243,7 @@ userSchema.methods.incrementLoginAttempts = async function () {
   return this.updateOne(updates);
 };
 
+// Method: Reset login attempts
 userSchema.methods.resetLoginAttempts = function () {
   return this.updateOne({
     $set: { failedLoginAttempts: 0 },
@@ -321,7 +251,7 @@ userSchema.methods.resetLoginAttempts = function () {
   });
 };
 
-// ==================== VIRTUALS ====================
+// Virtual: Full name string
 userSchema.virtual('fullNameString').get(function () {
   return `${this.fullName.firstName} ${this.fullName.middleName || ''} ${this.fullName.lastName}`.trim();
 });

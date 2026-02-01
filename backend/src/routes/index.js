@@ -1,6 +1,11 @@
 const express = require('express');
 const router = express.Router();
 
+// Import route modules
+const authRoutes = require('./auth.routes');
+const userRoutes = require('./user.routes');
+const walletRoutes = require('./wallet.routes');
+
 // ==================== API INFO ====================
 
 router.get('/', (req, res) => {
@@ -11,13 +16,16 @@ router.get('/', (req, res) => {
       auth: '/api/auth',
       users: '/api/users',
       wallets: '/api/wallets',
-      investments: '/api/investments',
-      withdrawals: '/api/withdrawals',
-      packages: '/api/packages',
     },
     health: '/health',
   });
 });
+
+// ==================== MOUNT ROUTES ====================
+
+router.use('/auth', authRoutes);
+router.use('/users', userRoutes);
+router.use('/wallets', walletRoutes);
 
 // ==================== TEST ROUTE ====================
 
