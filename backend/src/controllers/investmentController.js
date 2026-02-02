@@ -27,8 +27,8 @@ exports.createInvestment = async (req, res) => {
     }
 
     // Get package
-    const package = await Package.findById(packageId);
-    if (!package || !package.isActive) {
+    const pkg = await Package.findById(packageId);
+    if (!pkg || !pkg.isActive) {
       return res.status(404).json({
         status: 'error',
         message: 'Package not found or inactive',
@@ -36,8 +36,8 @@ exports.createInvestment = async (req, res) => {
     }
 
     // Validate amount
-    const minAmt = parseFloat(package.minAmount);
-    const maxAmt = package.maxAmount ? parseFloat(package.maxAmount) : null;
+    const minAmt = parseFloat(pkg.minAmount);
+    const maxAmt = pkg.maxAmount ? parseFloat(pkg.maxAmount) : null;
     
     if (amount < minAmt || (maxAmt && amount > maxAmt)) {
       return res.status(400).json({
@@ -68,13 +68,13 @@ exports.createInvestment = async (req, res) => {
     // Calculate dates and amounts
     const startDate = new Date();
     const maturityDate = new Date();
-    maturityDate.setDate(maturityDate.getDate() + package.duration);
+    maturityDate.setDate(maturityDate.getDate() + pkg.duration);
     
     const nextRoiDate = new Date();
     nextRoiDate.setDate(nextRoiDate.getDate() + 1);
 
-    const dailyRoiAmount = (amount * package.roiRate) / 100;
-    const totalRoiCap = (amount * package.roiCap) / 100;
+    const dailyRoiAmount = (amount * pkg.roiRate) / 100;
+    const totalRoiCap = (amount * pkg.roiCap) / 100;
 
     // Generate unique transaction ID
     const transactionId = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
@@ -87,36 +87,35 @@ exports.createInvestment = async (req, res) => {
     let investment = null;
 
     try {
-      // ✅ STEP 1: Create transaction record FIRST (pending state)
-      // ✅ STEP 1: Create transaction record FIRST (pending state)
-  transaction = await Transaction.create({
-    userId,
-    userCode: user.userCode,
-    transactionId, // Optional: will auto-generate if not provided
-    type: 'investment_debit',  // ✅ Changed to match enum
-    amount,
-    fee: 0,
-    netAmount: amount,
-    walletType: 'main',
-    balanceBefore: originalBalance,
-    balanceAfter: originalBalance - amount,
-    status: 'pending',
-    metadata: {
-      packageId,
-      packageName: package.name,
-    },
-  });
+      // STEP 1: Create transaction record FIRST
+      transaction = await Transaction.create({
+        userId,
+        userCode: user.userCode,
+        transactionId,
+        type: 'investment_debit',
+        amount,
+        fee: 0,
+        netAmount: amount,
+        walletType: 'main',
+        balanceBefore: originalBalance,
+        balanceAfter: originalBalance - amount,
+        status: 'pending',
+        metadata: {
+          packageId,
+          packageName: pkg.name,
+        },
+      });
 
-      // ✅ STEP 2: Create investment with transaction reference
+      // STEP 2: Create investment
       investment = await Investment.create({
         userId,
         packageId,
-        packageName: package.name,
+        packageName: pkg.name,
         amount,
-        type: package.type,
-        roiRate: package.roiRate,
-        roiCap: package.roiCap,
-        duration: package.duration,
+        type: pkg.type,
+        roiRate: pkg.roiRate,
+        roiCap: pkg.roiCap,
+        duration: pkg.duration,
         dailyRoiAmount,
         totalRoiCap,
         startDate,
@@ -126,12 +125,12 @@ exports.createInvestment = async (req, res) => {
         status: 'active',
       });
 
-      // ✅ STEP 3: Deduct from wallet (only after investment validated)
+      // STEP 3: Deduct from wallet
       wallet.mainBalance -= amount;
       wallet.totalInvested += amount;
       await wallet.save();
 
-      // ✅ STEP 4: Mark transaction as completed
+      // STEP 4: Mark transaction as completed
       transaction.status = 'completed';
       transaction.metadata.investmentId = investment._id;
       await transaction.save();
@@ -155,26 +154,26 @@ exports.createInvestment = async (req, res) => {
       });
 
     } catch (innerError) {
-     logger.error('❌ Investment creation failed, rolling back:', innerError.message);
-  
-  // Restore wallet
-  wallet.mainBalance = originalBalance;
-  wallet.totalInvested = originalInvested;
-  await wallet.save();
+      logger.error('❌ Investment creation failed, rolling back:', innerError.message);
+      
+      // Restore wallet
+      wallet.mainBalance = originalBalance;
+      wallet.totalInvested = originalInvested;
+      await wallet.save();
 
-  // Mark transaction as failed (if created)
-  if (transaction) {
-    transaction.status = 'failed';
-    transaction.metadata.error = innerError.message;
-    await transaction.save();
-  }
+      // Mark transaction as failed
+      if (transaction) {
+        transaction.status = 'failed';
+        transaction.metadata.error = innerError.message;
+        await transaction.save();
+      }
 
-  // Delete investment if created but failed later
-  if (investment) {
-    await Investment.deleteOne({ _id: investment._id });
-  }
+      // Delete investment if created
+      if (investment) {
+        await Investment.deleteOne({ _id: investment._id });
+      }
 
-  throw innerError;
+      throw innerError;
     }
 
   } catch (error) {
@@ -186,6 +185,7 @@ exports.createInvestment = async (req, res) => {
     });
   }
 };
+
 
 
 

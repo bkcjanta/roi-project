@@ -2,6 +2,7 @@ const app = require('./app');
 const connectDB = require('./config/database');
 const config = require('./config/environment');
 const logger = require('./utils/logger');
+const roiService = require('./services/roiService'); // ✅ Add this
 
 // Load environment variables
 require('dotenv').config();
@@ -24,6 +25,14 @@ const startServer = async () => {
       
       if (config.NODE_ENV === 'development') {
         logger.info(`📚 Base URL: http://localhost:${PORT}`);
+      }
+
+      // ✅ START ROI CRON JOB
+      try {
+        roiService.startCronJob();
+        logger.info('⏰ ROI Distribution Cron Job Started');
+      } catch (error) {
+        logger.error('❌ Failed to start ROI cron job:', error);
       }
     });
 

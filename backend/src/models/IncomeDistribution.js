@@ -1,4 +1,6 @@
 const mongoose = require('mongoose');
+const IncomeDistribution = require('../models/IncomeDistribution');
+
 
 const incomeDistributionSchema = new mongoose.Schema(
   {
@@ -16,7 +18,7 @@ const incomeDistributionSchema = new mongoose.Schema(
     
     incomeType: {
       type: String,
-      enum: ['referral', 'level', 'binary', 'matching', 'leadership'],
+      enum: ['referral', 'level', 'binary', 'matching', 'leadership', 'roi'],
       required: true,
     },
     

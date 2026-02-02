@@ -7,6 +7,8 @@ const userRoutes = require('./user.routes');
 const walletRoutes = require('./wallet.routes');
 const packageRoutes = require('./package.routes');
 const investmentRoutes = require('./investment.routes');
+const roiRoutes = require('./roi.routes'); // ✅ ADD THIS
+const transactionRoutes = require('./transaction.routes');
 
 // API info
 router.get('/', (req, res) => {
@@ -19,6 +21,9 @@ router.get('/', (req, res) => {
       wallets: '/api/wallets',
       packages: '/api/packages',
       investments: '/api/investments',
+      
+      roi: '/api/roi', // ✅ ADD THIS
+      transactions: '/api/transactions',
     },
     health: '/health',
   });
@@ -30,5 +35,7 @@ router.use('/users', userRoutes);
 router.use('/wallets', walletRoutes);
 router.use('/packages', packageRoutes);
 router.use('/investments', investmentRoutes);
+router.use('/roi', roiRoutes); // ✅ ADD THIS
+router.use('/transactions', transactionRoutes);
 
 module.exports = router;
