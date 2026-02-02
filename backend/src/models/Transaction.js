@@ -6,7 +6,7 @@ const transactionSchema = new mongoose.Schema(
     transactionId: {
       type: String,
       unique: true,
-      required: true,
+      // ✅ REMOVED: required: true
     },
     
     userId: {
@@ -116,6 +116,7 @@ const transactionSchema = new mongoose.Schema(
     metadata: {
       packageId: mongoose.Schema.Types.ObjectId,
       investmentId: mongoose.Schema.Types.ObjectId,
+      withdrawalId: mongoose.Schema.Types.ObjectId,
       referenceId: String,
       sourceTransactionId: String,
       adminNote: String,
@@ -145,7 +146,7 @@ const transactionSchema = new mongoose.Schema(
 
 // ==================== INDEXES ====================
 transactionSchema.index({ userId: 1, createdAt: -1 });
-transactionSchema.index({ transactionId: 1 }, { unique: true });
+transactionSchema.index({ transactionId: 1 }, { unique: true, sparse: true }); // ✅ Added sparse
 transactionSchema.index({ idempotencyKey: 1 }, { unique: true, sparse: true });
 transactionSchema.index({ type: 1, status: 1 });
 transactionSchema.index({ status: 1, createdAt: -1 });
@@ -153,7 +154,7 @@ transactionSchema.index({ status: 1, createdAt: -1 });
 // ==================== PRE-SAVE MIDDLEWARE ====================
 transactionSchema.pre('save', function (next) {
   if (!this.transactionId) {
-    this.transactionId = `TXN-${uuidv4().substr(0, 8).toUpperCase()}`;
+    this.transactionId = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
   }
   next();
 });

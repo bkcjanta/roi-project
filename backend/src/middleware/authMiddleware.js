@@ -3,17 +3,21 @@ const config = require('../config/environment');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 
+
 // ==================== AUTHENTICATION ====================
+
 
 // Protect routes - JWT verification
 exports.protect = async (req, res, next) => {
   try {
     let token;
 
+
     // Extract token from header
     if (req.headers.authorization?.startsWith('Bearer')) {
       token = req.headers.authorization.split(' ')[1];
     }
+
 
     if (!token) {
       return res.status(401).json({
@@ -22,11 +26,14 @@ exports.protect = async (req, res, next) => {
       });
     }
 
+
     // Verify token
     const decoded = jwt.verify(token, config.JWT_SECRET);
 
+
     // Get user from token
     const user = await User.findById(decoded.id).select('-password');
+
 
     if (!user) {
       return res.status(401).json({
@@ -34,6 +41,7 @@ exports.protect = async (req, res, next) => {
         message: 'User not found',
       });
     }
+
 
     // Check account status
     if (user.accountStatus !== 'active') {
@@ -43,11 +51,13 @@ exports.protect = async (req, res, next) => {
       });
     }
 
+
     // Attach user to request
     req.user = user;
     next();
   } catch (error) {
     logger.error('Auth middleware error:', error);
+
 
     if (error.name === 'JsonWebTokenError') {
       return res.status(401).json({
@@ -56,12 +66,14 @@ exports.protect = async (req, res, next) => {
       });
     }
 
+
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({
         status: 'error',
         message: 'Token expired',
       });
     }
+
 
     res.status(401).json({
       status: 'error',
@@ -70,9 +82,11 @@ exports.protect = async (req, res, next) => {
   }
 };
 
+
 // ==================== ROLE-BASED AUTHORIZATION ====================
 
-// Role-based access control
+
+// Role-based access control (ALIAS for authorize - keep both for compatibility)
 exports.restrictTo = (...roles) => {
   return (req, res, next) => {
     if (!req.user) {
@@ -81,6 +95,7 @@ exports.restrictTo = (...roles) => {
         message: 'Not authenticated',
       });
     }
+
 
     if (!roles.includes(req.user.role)) {
       logger.warn(`Access denied for user ${req.user.email} (role: ${req.user.role}). Required: ${roles.join(' or ')}`);
@@ -93,15 +108,43 @@ exports.restrictTo = (...roles) => {
   };
 };
 
+
+// ✅ NEW: Authorize middleware (same as restrictTo, different name for consistency)
+exports.authorize = (...roles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Not authenticated',
+      });
+    }
+
+
+    if (!roles.includes(req.user.role)) {
+      logger.warn(`Access denied for user ${req.user.email} (role: ${req.user.role}). Required: ${roles.join(' or ')}`);
+      return res.status(403).json({
+        status: 'error',
+        message: `Access denied. Required role: ${roles.join(' or ')}`,
+      });
+    }
+    next();
+  };
+};
+
+
 // ==================== CONVENIENCE SHORTCUTS ====================
+
 
 // Admin only access (admin or super_admin)
 exports.adminOnly = exports.restrictTo('admin', 'super_admin');
 
+
 // Super admin only
 exports.superAdminOnly = exports.restrictTo('super_admin');
 
+
 // ==================== PERMISSION-BASED AUTHORIZATION ====================
+
 
 // Permission-based access control
 exports.hasPermission = (...permissions) => {
@@ -113,15 +156,18 @@ exports.hasPermission = (...permissions) => {
       });
     }
 
+
     // Super admin has all permissions
     if (req.user.role === 'super_admin') {
       return next();
     }
 
+
     // Check if user has required permissions
     const hasRequiredPermission = permissions.some(permission =>
       req.user.permissions && req.user.permissions.includes(permission)
     );
+
 
     if (!hasRequiredPermission) {
       logger.warn(`Permission denied for user ${req.user.email}: Required ${permissions.join(' or ')}`);
@@ -132,38 +178,47 @@ exports.hasPermission = (...permissions) => {
       });
     }
 
+
     next();
   };
 };
 
+
 // ==================== SELF OR ADMIN ====================
+
 
 // Self or admin (user can access own data, admin can access anyone's)
 exports.selfOrAdmin = async (req, res, next) => {
   try {
     const requestedUserId = req.params.userId || req.params.id;
 
+
     // If no user ID in params, skip check
     if (!requestedUserId) {
       return next();
     }
+
 
     // Admin can access anyone's data
     if (['admin', 'super_admin'].includes(req.user.role)) {
       return next();
     }
 
+
     // User can access their own data
     if (req.user._id.toString() === requestedUserId) {
       return next();
     }
 
+
     logger.warn(`Unauthorized access attempt by ${req.user.email} to user ${requestedUserId}`);
+
 
     return res.status(403).json({
       status: 'error',
       message: 'Access denied. You can only access your own data.',
     });
+
 
   } catch (error) {
     logger.error('SelfOrAdmin middleware error:', error);
@@ -174,7 +229,9 @@ exports.selfOrAdmin = async (req, res, next) => {
   }
 };
 
+
 // ==================== ACCOUNT VERIFICATION ====================
+
 
 // Verify user account is verified
 exports.verifiedOnly = (req, res, next) => {
@@ -185,6 +242,7 @@ exports.verifiedOnly = (req, res, next) => {
     });
   }
 
+
   if (!req.user.isEmailVerified) {
     return res.status(403).json({
       status: 'error',
@@ -194,7 +252,9 @@ exports.verifiedOnly = (req, res, next) => {
   next();
 };
 
+
 // ==================== RATE LIMITING ====================
+
 
 // Rate limiting helper (basic in-memory implementation)
 exports.checkRateLimit = (maxRequests = 100, windowMs = 15 * 60 * 1000) => {
@@ -204,6 +264,7 @@ exports.checkRateLimit = (maxRequests = 100, windowMs = 15 * 60 * 1000) => {
     if (!req.user) {
       return next();
     }
+
 
     const userId = req.user._id.toString();
     const now = Date.now();
@@ -229,7 +290,9 @@ exports.checkRateLimit = (maxRequests = 100, windowMs = 15 * 60 * 1000) => {
   };
 };
 
+
 // ==================== OWNERSHIP VERIFICATION ====================
+
 
 // Verify resource ownership (generic)
 exports.verifyOwnership = (Model, resourceIdParam = 'id') => {
@@ -238,13 +301,16 @@ exports.verifyOwnership = (Model, resourceIdParam = 'id') => {
       const resourceId = req.params[resourceIdParam];
       const userId = req.user._id;
 
+
       // Admin can access any resource
       if (['admin', 'super_admin'].includes(req.user.role)) {
         return next();
       }
 
+
       // Check if resource belongs to user
       const resource = await Model.findById(resourceId);
+
 
       if (!resource) {
         return res.status(404).json({
@@ -252,6 +318,7 @@ exports.verifyOwnership = (Model, resourceIdParam = 'id') => {
           message: 'Resource not found',
         });
       }
+
 
       if (resource.userId.toString() !== userId.toString()) {
         logger.warn(`Ownership verification failed for user ${req.user.email}`);
@@ -261,9 +328,11 @@ exports.verifyOwnership = (Model, resourceIdParam = 'id') => {
         });
       }
 
+
       // Attach resource to request for further use
       req.resource = resource;
       next();
+
 
     } catch (error) {
       logger.error('Ownership verification error:', error);
@@ -275,7 +344,9 @@ exports.verifyOwnership = (Model, resourceIdParam = 'id') => {
   };
 };
 
+
 // ==================== CONDITIONAL MIDDLEWARE ====================
+
 
 // Apply middleware only if condition is true
 exports.conditionalMiddleware = (condition, middleware) => {

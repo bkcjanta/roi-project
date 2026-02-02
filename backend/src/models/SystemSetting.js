@@ -37,6 +37,6 @@ const systemSettingSchema = new mongoose.Schema(
 );
 
 // ==================== INDEXES ====================
-systemSettingSchema.index({ settingKey: 1 }, { unique: true });
+// systemSettingSchema.index({ settingKey: 1 }, { unique: true });
 
 module.exports = mongoose.model('SystemSetting', systemSettingSchema);

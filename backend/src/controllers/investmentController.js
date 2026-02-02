@@ -5,21 +5,22 @@ const Wallet = require('../models/Wallet');
 const Transaction = require('../models/Transaction');
 const User = require('../models/User');
 const logger = require('../utils/logger');
+const levelIncomeService = require('../services/levelIncomeService');
+const binaryIncomeService = require('../services/binaryIncomeService');
+const SettingsHelper = require('../utils/settingsHelper');
 
-
-// Create new investment
-// Create new investment (WITHOUT transactions for standalone MongoDB)
-// Create new investment (WITHOUT transactions for standalone MongoDB)
-// Create new investment (WITHOUT transactions for standalone MongoDB)
-// Create new investment with PROPER error handling
-// Create new investment - PRODUCTION READY
+// ==================== CREATE INVESTMENT ====================
 exports.createInvestment = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { packageId, amount } = req.body;
     const userId = req.user.id;
 
     // Validation
     if (!packageId || !amount) {
+      await session.abortTransaction();
       return res.status(400).json({
         status: 'error',
         message: 'Please provide package and amount',
@@ -27,8 +28,9 @@ exports.createInvestment = async (req, res) => {
     }
 
     // Get package
-    const pkg = await Package.findById(packageId);
+    const pkg = await Package.findById(packageId).session(session);
     if (!pkg || !pkg.isActive) {
+      await session.abortTransaction();
       return res.status(404).json({
         status: 'error',
         message: 'Package not found or inactive',
@@ -40,17 +42,19 @@ exports.createInvestment = async (req, res) => {
     const maxAmt = pkg.maxAmount ? parseFloat(pkg.maxAmount) : null;
     
     if (amount < minAmt || (maxAmt && amount > maxAmt)) {
+      await session.abortTransaction();
       return res.status(400).json({
         status: 'error',
-        message: `Amount must be between ${minAmt} and ${maxAmt || 'unlimited'}`,
+        message: `Amount must be between ₹${minAmt} and ₹${maxAmt || 'unlimited'}`,
       });
     }
 
     // Get user and wallet
-    const user = await User.findById(userId);
-    const wallet = await Wallet.findOne({ userId });
+    const user = await User.findById(userId).session(session);
+    const wallet = await Wallet.findOne({ userId }).session(session);
     
     if (!wallet) {
+      await session.abortTransaction();
       return res.status(404).json({
         status: 'error',
         message: 'Wallet not found',
@@ -59,9 +63,10 @@ exports.createInvestment = async (req, res) => {
 
     // Check balance
     if (wallet.mainBalance < amount) {
+      await session.abortTransaction();
       return res.status(400).json({
         status: 'error',
-        message: 'Insufficient balance',
+        message: `Insufficient balance. Available: ₹${wallet.mainBalance}`,
       });
     }
 
@@ -79,127 +84,137 @@ exports.createInvestment = async (req, res) => {
     // Generate unique transaction ID
     const transactionId = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
-    // Save original balance for rollback
-    const originalBalance = wallet.mainBalance;
-    const originalInvested = wallet.totalInvested;
+    // ========== STEP 1: Create Investment ==========
+    const investment = await Investment.create([{
+      userId,
+      packageId,
+      packageName: pkg.name,
+      amount,
+      type: pkg.type,
+      roiRate: pkg.roiRate,
+      roiCap: pkg.roiCap,
+      duration: pkg.duration,
+      dailyRoiAmount,
+      totalRoiCap,
+      startDate,
+      maturityDate,
+      nextRoiDate,
+      status: 'active',
+    }], { session });
 
-    let transaction = null;
-    let investment = null;
-
-    try {
-      // STEP 1: Create transaction record FIRST
-      transaction = await Transaction.create({
-        userId,
-        userCode: user.userCode,
-        transactionId,
-        type: 'investment_debit',
-        amount,
-        fee: 0,
-        netAmount: amount,
-        walletType: 'main',
-        balanceBefore: originalBalance,
-        balanceAfter: originalBalance - amount,
-        status: 'pending',
-        metadata: {
-          packageId,
-          packageName: pkg.name,
-        },
-      });
-
-      // STEP 2: Create investment
-      investment = await Investment.create({
-        userId,
+    // ========== STEP 2: Create Transaction ==========
+    const transaction = await Transaction.create([{
+      userId,
+      userCode: user.userCode,
+      transactionId,
+      type: 'investment_debit',
+      amount,
+      fee: 0,
+      netAmount: amount,
+      walletType: 'main',
+      balanceBefore: wallet.mainBalance,
+      balanceAfter: wallet.mainBalance - amount,
+      status: 'completed',
+      metadata: {
         packageId,
         packageName: pkg.name,
-        amount,
-        type: pkg.type,
-        roiRate: pkg.roiRate,
-        roiCap: pkg.roiCap,
-        duration: pkg.duration,
-        dailyRoiAmount,
-        totalRoiCap,
-        startDate,
-        maturityDate,
-        nextRoiDate,
-        transactionId: transaction._id,
-        status: 'active',
-      });
+        investmentId: investment[0]._id,
+      },
+    }], { session });
 
-      // STEP 3: Deduct from wallet
-      wallet.mainBalance -= amount;
-      wallet.totalInvested += amount;
-      await wallet.save();
+    // ========== STEP 3: Update Wallet ==========
+    wallet.mainBalance -= amount;
+    wallet.totalInvested += amount;
+    await wallet.save({ session });
 
-      // STEP 4: Mark transaction as completed
-      transaction.status = 'completed';
-      transaction.metadata.investmentId = investment._id;
-      await transaction.save();
+    // Link transaction to investment
+    investment[0].transactionId = transaction[0]._id;
+    await investment[0].save({ session });
 
-      logger.info(`✅ Investment created: User ${userId}, Amount ${amount}, ID ${investment._id}`);
-
-      res.status(201).json({
-        status: 'success',
-        message: 'Investment created successfully',
-        data: {
-          investment,
-          transaction: {
-            transactionId: transaction.transactionId,
-            status: transaction.status,
-          },
-          wallet: {
-            mainBalance: wallet.mainBalance,
-            totalInvested: wallet.totalInvested,
-          },
-        },
-      });
-
-    } catch (innerError) {
-      logger.error('❌ Investment creation failed, rolling back:', innerError.message);
+    // ========== STEP 4: CREATE LEVEL INCOME COMMISSIONS ==========
+    let commissions = [];
+    const levelSettings = await SettingsHelper.getByPrefix('levelIncome');
+    
+    if (levelSettings.enabled && amount >= (levelSettings.minInvestment || 1000)) {
+      const levelConfig = levelSettings.levels || [];
       
-      // Restore wallet
-      wallet.mainBalance = originalBalance;
-      wallet.totalInvested = originalInvested;
-      await wallet.save();
+      try {
+        commissions = await levelIncomeService.createCommissionRecords(
+          investment[0],
+          session,
+          levelConfig
+        );
 
-      // Mark transaction as failed
-      if (transaction) {
-        transaction.status = 'failed';
-        transaction.metadata.error = innerError.message;
-        await transaction.save();
+        logger.info(`✅ Created ${commissions.length} level income commissions`);
+      } catch (commError) {
+        logger.error('❌ Commission creation failed:', commError);
+        // Don't fail transaction, just log error
       }
-
-      // Delete investment if created
-      if (investment) {
-        await Investment.deleteOne({ _id: investment._id });
-      }
-
-      throw innerError;
     }
 
+    // ========== COMMIT TRANSACTION ==========
+    await session.commitTransaction();
+
+    logger.info(`✅ Investment created: User ${user.userCode}, Amount ₹${amount}, ID ${investment[0]._id}`);
+
+    // ========== STEP 5: UPDATE BINARY BUSINESS (Non-blocking) ==========
+    const binarySettings = await SettingsHelper.getByPrefix('binary');
+    
+    if (binarySettings.enabled) {
+      // Run in background after response sent
+      setImmediate(async () => {
+        try {
+          await binaryIncomeService.updateBinaryBusiness(investment[0]);
+          logger.info(`✅ Binary business updated for investment ${investment[0]._id}`);
+        } catch (binaryError) {
+          logger.error('❌ Binary business update failed:', binaryError);
+        }
+      });
+    }
+
+    // ========== RESPONSE ==========
+    res.status(201).json({
+      status: 'success',
+      message: 'Investment created successfully',
+      data: {
+        investment: investment[0],
+        transaction: {
+          transactionId: transaction[0].transactionId,
+          status: transaction[0].status,
+        },
+        wallet: {
+          mainBalance: wallet.mainBalance,
+          totalInvested: wallet.totalInvested,
+        },
+        commissions: {
+          levelIncomeCreated: commissions.length,
+          binaryUpdateQueued: binarySettings.enabled,
+        },
+      },
+    });
+
   } catch (error) {
-    logger.error('Create investment error:', error);
+    await session.abortTransaction();
+    logger.error('❌ Create investment error:', error);
+    
     res.status(500).json({
       status: 'error',
       message: 'Failed to create investment',
       error: error.message,
     });
+  } finally {
+    session.endSession();
   }
 };
 
-
-
-
-
-
-// Get user's investments
-// Get user's investments
+// ==================== GET MY INVESTMENTS ====================
 exports.getMyInvestments = async (req, res) => {
   try {
     const userId = req.user.id;
     const { status, page = 1, limit = 10 } = req.query;
 
     // Build filter
-    const filter = { userId }; // ✅ Direct use, no ObjectId() needed
+    const filter = { userId };
     
     if (status) {
       filter.status = status;
@@ -222,7 +237,7 @@ exports.getMyInvestments = async (req, res) => {
     const stats = await Investment.aggregate([
       { 
         $match: { 
-          userId: new mongoose.Types.ObjectId(userId) // ✅ Use mongoose.Types.ObjectId
+          userId: new mongoose.Types.ObjectId(userId)
         } 
       },
       {
@@ -268,7 +283,7 @@ exports.getMyInvestments = async (req, res) => {
   }
 };
 
-// Get single investment
+// ==================== GET SINGLE INVESTMENT ====================
 exports.getInvestmentById = async (req, res) => {
   try {
     const investment = await Investment.findOne({
@@ -303,7 +318,7 @@ exports.getInvestmentById = async (req, res) => {
   }
 };
 
-// Get active investments summary
+// ==================== GET ACTIVE INVESTMENTS ====================
 exports.getActiveInvestments = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -313,13 +328,14 @@ exports.getActiveInvestments = async (req, res) => {
       status: 'active',
     })
       .populate('packageId', 'name type roiRate')
-      .select('amount totalROI totalROIPaid maturityDate createdAt');
+      .select('amount totalRoiCap totalRoiPaid maturityDate createdAt')
+      .sort({ createdAt: -1 });
 
     const summary = investments.reduce(
       (acc, inv) => {
         acc.totalInvested += inv.amount;
-        acc.totalROIExpected += inv.totalROI;
-        acc.totalROIReceived += inv.totalROIPaid;
+        acc.totalROIExpected += inv.totalRoiCap || 0;
+        acc.totalROIReceived += inv.totalRoiPaid || 0;
         return acc;
       },
       { totalInvested: 0, totalROIExpected: 0, totalROIReceived: 0 }
@@ -343,7 +359,7 @@ exports.getActiveInvestments = async (req, res) => {
   }
 };
 
-// Get ROI history
+// ==================== GET ROI HISTORY ====================
 exports.getROIHistory = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -365,9 +381,9 @@ exports.getROIHistory = async (req, res) => {
       status: 'success',
       data: {
         roiDistributions: investment.roiDistributions || [],
-        totalROIPaid: investment.totalROIPaid,
-        totalROI: investment.totalROI,
-        remaining: investment.totalROI - investment.totalROIPaid,
+        totalROIPaid: investment.totalRoiPaid || 0,
+        totalROICap: investment.totalRoiCap || 0,
+        remaining: (investment.totalRoiCap || 0) - (investment.totalRoiPaid || 0),
       },
     });
   } catch (error) {
@@ -375,6 +391,62 @@ exports.getROIHistory = async (req, res) => {
     res.status(500).json({
       status: 'error',
       message: 'Failed to fetch ROI history',
+      error: error.message,
+    });
+  }
+};
+
+// ==================== GET INVESTMENT STATS ====================
+exports.getInvestmentStats = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const stats = await Investment.aggregate([
+      { $match: { userId: new mongoose.Types.ObjectId(userId) } },
+      {
+        $facet: {
+          byStatus: [
+            {
+              $group: {
+                _id: '$status',
+                count: { $sum: 1 },
+                totalAmount: { $sum: '$amount' },
+              },
+            },
+          ],
+          byPackage: [
+            {
+              $group: {
+                _id: '$packageName',
+                count: { $sum: 1 },
+                totalAmount: { $sum: '$amount' },
+              },
+            },
+          ],
+          overall: [
+            {
+              $group: {
+                _id: null,
+                totalInvestments: { $sum: 1 },
+                totalInvested: { $sum: '$amount' },
+                totalROIPaid: { $sum: '$totalRoiPaid' },
+                avgInvestment: { $avg: '$amount' },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    res.status(200).json({
+      status: 'success',
+      data: stats[0],
+    });
+  } catch (error) {
+    logger.error('Get investment stats error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch investment stats',
       error: error.message,
     });
   }

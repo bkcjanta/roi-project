@@ -6,15 +6,22 @@ const withdrawalSchema = new mongoose.Schema(
     withdrawalId: {
       type: String,
       unique: true,
-      required: true,
+      // ✅ REMOVE required: true (will be generated in pre-save)
     },
     
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
+      index: true,
+    },
+
+    userCode: {
+      type: String,
+      required: true,
     },
     
+    // Amount Details
     amount: {
       type: mongoose.Schema.Types.Decimal128,
       required: true,
@@ -32,13 +39,39 @@ const withdrawalSchema = new mongoose.Schema(
       required: true,
       get: (v) => parseFloat(v.toString()),
     },
+
+    // Wallet Info
+    walletType: {
+      type: String,
+      enum: ['roi', 'referral', 'level', 'binary', 'main'],
+      default: 'roi',
+    },
+
+    balanceBefore: {
+      type: mongoose.Schema.Types.Decimal128,
+      get: (v) => (v ? parseFloat(v.toString()) : 0),
+    },
     
     // Bank Details Snapshot
     bankDetails: {
-      accountNumber: String,
-      ifscCode: String,
-      accountHolderName: String,
-      bankName: String,
+      accountNumber: {
+        type: String,
+        required: true,
+      },
+      ifscCode: {
+        type: String,
+        required: true,
+        uppercase: true,
+      },
+      accountHolderName: {
+        type: String,
+        required: true,
+      },
+      bankName: {
+        type: String,
+        required: true,
+      },
+      branchName: String,
     },
     
     // Status
@@ -74,12 +107,27 @@ const withdrawalSchema = new mongoose.Schema(
     adminNote: String,
     
     // Payment Processing
+    paymentMethod: {
+      type: String,
+      enum: ['bank_transfer', 'upi', 'manual'],
+      default: 'bank_transfer',
+    },
+
     utrNumber: String,
     paymentProofUrl: String,
     processedAt: Date,
     
     // Transaction Reference
-    transactionId: String,
+    transactionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Transaction',
+    },
+
+    // Metadata
+    metadata: {
+      ipAddress: String,
+      userAgent: String,
+    },
     
     // Timestamps
     requestedAt: {
@@ -99,12 +147,14 @@ const withdrawalSchema = new mongoose.Schema(
 // ==================== INDEXES ====================
 withdrawalSchema.index({ userId: 1, requestedAt: -1 });
 withdrawalSchema.index({ status: 1, requestedAt: -1 });
-withdrawalSchema.index({ withdrawalId: 1 }, { unique: true });
+withdrawalSchema.index({ withdrawalId: 1 }, { unique: true, sparse: true });
+withdrawalSchema.index({ userCode: 1 });
 
 // ==================== PRE-SAVE MIDDLEWARE ====================
-withdrawalSchema.pre('save', function (next) {
+withdrawalSchema.pre('save', async function (next) {
+  // Generate withdrawalId if not present
   if (!this.withdrawalId) {
-    this.withdrawalId = `WD-${uuidv4().substr(0, 8).toUpperCase()}`;
+    this.withdrawalId = `WDL-${uuidv4().substr(0, 8).toUpperCase()}`;
   }
   next();
 });

@@ -1,8 +1,10 @@
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const Wallet = require('../models/Wallet');
 const jwt = require('jsonwebtoken');
 const config = require('../config/environment');
 const logger = require('../utils/logger');
+const referralTreeService = require('../services/referralTreeService');
 
 // Helper: Generate access token
 const generateToken = (userId, role) => {
@@ -18,13 +20,56 @@ const generateRefreshToken = (userId) => {
   });
 };
 
-// Register new user
+// Helper: Generate unique user code
+const generateUniqueUserCode = async () => {
+  let code;
+  let exists = true;
+
+  while (exists) {
+    const userCount = await User.countDocuments();
+    code = `USR${String(userCount + 1).padStart(6, '0')}`;
+    const user = await User.findOne({ userCode: code });
+    exists = !!user;
+  }
+
+  return code;
+};
+
+// Helper: Generate unique referral code
+const generateUniqueReferralCode = async () => {
+  let code;
+  let exists = true;
+
+  while (exists) {
+    code = `REF${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+    const user = await User.findOne({ referralCode: code });
+    exists = !!user;
+  }
+
+  return code;
+};
+
+// ==================== REGISTER USER ====================
 exports.register = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const { email, mobile, password, firstName, lastName, referredByCode } = req.body;
+    const { 
+      email, 
+      mobile, 
+      password, 
+      firstName, 
+      middleName,
+      lastName, 
+      sponsorCode, // ✅ NEW: Referral/Sponsor code
+      dateOfBirth,
+      gender,
+    } = req.body;
 
     // Validate required fields
     if (!email || !mobile || !password || !firstName || !lastName) {
+      await session.abortTransaction();
       return res.status(400).json({
         status: 'error',
         message: 'Please provide all required fields',
@@ -32,67 +77,105 @@ exports.register = async (req, res) => {
     }
 
     // Check existing user
-    const existingUser = await User.findOne({ $or: [{ email }, { mobile }] });
+    const existingUser = await User.findOne({ 
+      $or: [{ email }, { mobile }] 
+    }).session(session);
+
     if (existingUser) {
+      await session.abortTransaction();
       return res.status(400).json({
         status: 'error',
-        message: existingUser.email === email ? 'Email already registered' : 'Mobile already registered',
+        message: existingUser.email === email 
+          ? 'Email already registered' 
+          : 'Mobile already registered',
       });
     }
 
-    // Validate referral code
-    let referredByUser = null;
-    if (referredByCode) {
-      referredByUser = await User.findOne({ referralCode: referredByCode });
-      if (!referredByUser) {
+    // Validate sponsor code if provided
+    if (sponsorCode) {
+      const sponsor = await User.findOne({ 
+        userCode: sponsorCode.toUpperCase() 
+      }).session(session);
+
+      if (!sponsor) {
+        await session.abortTransaction();
         return res.status(400).json({
           status: 'error',
-          message: 'Invalid referral code',
+          message: 'Invalid sponsor code',
         });
       }
     }
 
     // Generate unique codes
-    const userCount = await User.countDocuments();
-    const userCode = `USR${String(userCount + 1).padStart(6, '0')}`;
-    const referralCode = `REF${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+    const userCode = await generateUniqueUserCode();
+    const referralCode = await generateUniqueReferralCode();
 
     // Create user
-    const user = await User.create({
+    const user = new User({
       userCode,
       referralCode,
       email,
       mobile,
       password,
-      fullName: { firstName, lastName },
-      referredBy: referredByUser?._id,
-      sponsorCode: referredByCode,
+      fullName: { 
+        firstName, 
+        middleName: middleName || '', 
+        lastName 
+      },
+      dateOfBirth,
+      gender,
       registrationIp: req.ip,
       registrationDevice: req.get('user-agent'),
     });
 
+    // ✅ NEW: Build referral & binary tree
+    let treeData = { uplineChain: [], binaryPlacement: null, isRoot: true };
+    
+    if (sponsorCode) {
+      try {
+        treeData = await referralTreeService.buildTreeOnRegistration(
+          user,
+          sponsorCode,
+          session
+        );
+
+        logger.info(`✅ Tree built for ${user.userCode}:`, {
+          uplineLevels: treeData.uplineChain.length,
+          binaryPosition: treeData.binaryPlacement?.position,
+        });
+      } catch (treeError) {
+        await session.abortTransaction();
+        logger.error('Tree building failed:', treeError);
+        return res.status(400).json({
+          status: 'error',
+          message: `Referral tree error: ${treeError.message}`,
+        });
+      }
+    }
+
+    // Save user (with tree data already set)
+    await user.save({ session });
+
     // Create wallet
-    const wallet = await Wallet.create({ userId: user._id });
+    const wallet = await Wallet.create([{
+      userId: user._id,
+      userCode: user.userCode,
+    }], { session });
 
     // Link wallet to user
-    await User.findByIdAndUpdate(user._id, {
-      'wallets.main': wallet._id,
-      'wallets.income': wallet._id,
-      'wallets.roi': wallet._id,
-    });
+    user.wallets.main = wallet[0]._id;
+    user.wallets.income = wallet[0]._id;
+    user.wallets.roi = wallet[0]._id;
+    await user.save({ session });
 
-    // Update referrer stats
-    if (referredByUser) {
-      await User.findByIdAndUpdate(referredByUser._id, {
-        $inc: { totalDirectReferrals: 1 },
-      });
-    }
+    // Commit transaction
+    await session.commitTransaction();
 
     // Generate tokens
     const token = generateToken(user._id, user.role);
     const refreshToken = generateRefreshToken(user._id);
 
-    logger.info(`User registered: ${user.email}`);
+    logger.info(`✅ User registered: ${user.email} (${user.userCode})`);
 
     res.status(201).json({
       status: 'success',
@@ -103,25 +186,32 @@ exports.register = async (req, res) => {
           userCode: user.userCode,
           email: user.email,
           mobile: user.mobile,
-          fullName: `${firstName} ${lastName}`,
+          fullName: `${firstName} ${middleName || ''} ${lastName}`.trim(),
           referralCode: user.referralCode,
           role: user.role,
+          sponsor: user.sponsorCode || null,
+          uplineLevels: treeData.uplineChain.length,
+          binaryPosition: treeData.binaryPlacement?.position || null,
         },
         token,
         refreshToken,
       },
     });
+
   } catch (error) {
+    await session.abortTransaction();
     logger.error('Registration error:', error);
     res.status(500).json({
       status: 'error',
       message: 'Registration failed',
       error: error.message,
     });
+  } finally {
+    session.endSession();
   }
 };
 
-// Login user
+// ==================== LOGIN USER ====================
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -147,7 +237,7 @@ exports.login = async (req, res) => {
     if (user.isLocked()) {
       return res.status(423).json({
         status: 'error',
-        message: 'Account locked due to multiple failed attempts',
+        message: 'Account locked due to multiple failed attempts. Try again later.',
       });
     }
 
@@ -182,7 +272,7 @@ exports.login = async (req, res) => {
     const token = generateToken(user._id, user.role);
     const refreshToken = generateRefreshToken(user._id);
 
-    logger.info(`User logged in: ${user.email}`);
+    logger.info(`✅ User logged in: ${user.email}`);
 
     res.status(200).json({
       status: 'success',
@@ -193,10 +283,11 @@ exports.login = async (req, res) => {
           userCode: user.userCode,
           email: user.email,
           mobile: user.mobile,
-          fullName: `${user.fullName.firstName} ${user.fullName.lastName}`,
+          fullName: user.fullNameString,
           referralCode: user.referralCode,
           role: user.role,
           kycStatus: user.kycStatus,
+          teamCount: user.teamCount,
         },
         token,
         refreshToken,
@@ -212,10 +303,13 @@ exports.login = async (req, res) => {
   }
 };
 
-// Get current user
+// ==================== GET CURRENT USER ====================
 exports.getCurrentUser = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).populate('wallets.main wallets.income wallets.roi');
+    const user = await User.findById(req.user.id)
+      .populate('wallets.main wallets.income wallets.roi')
+      .populate('sponsorId', 'userCode fullName')
+      .populate('binaryParentId', 'userCode fullName');
 
     if (!user) {
       return res.status(404).json({
@@ -226,7 +320,14 @@ exports.getCurrentUser = async (req, res) => {
 
     res.status(200).json({
       status: 'success',
-      data: { user },
+      data: { 
+        user,
+        referralInfo: {
+          uplineChain: user.uplineChain,
+          teamCount: user.teamCount,
+          binaryTeam: user.binaryTeam,
+        },
+      },
     });
   } catch (error) {
     logger.error('Get current user error:', error);
@@ -238,7 +339,7 @@ exports.getCurrentUser = async (req, res) => {
   }
 };
 
-// Logout user
+// ==================== LOGOUT ====================
 exports.logout = async (req, res) => {
   try {
     logger.info(`User logged out: ${req.user.id}`);
@@ -256,7 +357,7 @@ exports.logout = async (req, res) => {
   }
 };
 
-// Refresh token
+// ==================== REFRESH TOKEN ====================
 exports.refreshToken = async (req, res) => {
   try {
     const { refreshToken } = req.body;
@@ -297,7 +398,7 @@ exports.refreshToken = async (req, res) => {
   }
 };
 
-// Change password
+// ==================== CHANGE PASSWORD ====================
 exports.changePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;

@@ -139,6 +139,12 @@ app.get('/', (req, res) => {
   res.status(200).json({
     message: 'Welcome to ROI Investment Platform API',
     version: '1.0.0',
+    features: [
+      'Investment Management',
+      'Level Income System',
+      'Binary Income System',
+      'Referral Tree Management',
+    ],
     documentation: '/api/docs',
     health: '/health',
   });
