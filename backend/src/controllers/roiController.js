@@ -52,7 +52,7 @@ exports.getROIHistory = async (req, res) => {
       status: 'success',
       data: {
         transactions,
-        totalEarnings: transactions.reduce((sum, t) => sum + t.amount, 0),
+        totalEarnings: transactions.reduce((sum, t) => sum + parseFloat(t.amount || 0), 0),
         pagination: {
           total,
           page: parseInt(page),
@@ -87,15 +87,15 @@ exports.getROISummary = async (req, res) => {
 
     const summary = {
       totalInvestments: investments.length,
-      totalInvestedAmount: investments.reduce((sum, inv) => sum + inv.amount, 0),
-      totalROIPaid: investments.reduce((sum, inv) => sum + inv.totalRoiPaid, 0),
-      currentROIBalance: wallet?.roiBalance || 0,
-      dailyROIExpected: investments.reduce((sum, inv) => sum + inv.dailyRoiAmount, 0),
+      totalInvestedAmount: investments.reduce((sum, inv) => sum + parseFloat(inv.amount || 0), 0),
+      totalROIPaid: investments.reduce((sum, inv) => sum + parseFloat(inv.totalRoiPaid || 0), 0),
+      currentROIBalance: parseFloat(wallet?.roiBalance || 0),
+      dailyROIExpected: investments.reduce((sum, inv) => sum + parseFloat(inv.dailyRoiAmount || 0), 0),
       activeInvestments: investments.map(inv => ({
         id: inv._id,
-        amount: inv.amount,
-        dailyRoi: inv.dailyRoiAmount,
-        totalPaid: inv.totalRoiPaid,
+        amount: parseFloat(inv.amount),
+        dailyRoi: parseFloat(inv.dailyRoiAmount),
+        totalPaid: parseFloat(inv.totalRoiPaid || 0),
         daysCompleted: inv.daysCompleted,
         duration: inv.duration,
         nextRoiDate: inv.nextRoiDate,

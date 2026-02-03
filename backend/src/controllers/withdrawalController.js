@@ -6,26 +6,45 @@ const User = require('../models/User');
 const SettingsHelper = require('../utils/settingsHelper');
 const logger = require('../utils/logger');
 
-
 // ==================== USER FUNCTIONS ====================
 
-
+// Request withdrawal
 // Request withdrawal
 exports.requestWithdrawal = async (req, res) => {
   try {
     const { amount, walletType = 'roi', bankDetails } = req.body;
     const userId = req.user.id;
 
-    // Get withdrawal settings from database
-    const withdrawalSettings = await SettingsHelper.getByPrefix('withdrawal');
-    const kycSettings = await SettingsHelper.getByPrefix('kyc');
+    // ✅ FIXED: Default settings with proper fallback
+    let withdrawalSettings = {
+      enabled: true,
+      minAmount: 100,
+      maxAmount: 100000,
+      feePercentage: 5,
+      dailyLimit: 3,
+      processingTime: '24-48 hours'
+    };
 
-    // Check if withdrawals are enabled
-    if (!withdrawalSettings.isEnabled) {
-      return res.status(403).json({
-        status: 'error',
-        message: 'Withdrawals are currently disabled. Please contact support.',
-      });
+    let kycSettings = {
+      requiredForWithdrawal: false,
+      maxAmountWithoutKYC: 5000
+    };
+
+    // Try to load from database, but don't fail if not found
+    try {
+      const dbWithdrawalSettings = await SettingsHelper.getByPrefix('withdrawal');
+      const dbKycSettings = await SettingsHelper.getByPrefix('kyc');
+      
+      // Only override if DB settings exist and are not empty
+      if (dbWithdrawalSettings && Object.keys(dbWithdrawalSettings).length > 0) {
+        withdrawalSettings = { ...withdrawalSettings, ...dbWithdrawalSettings };
+      }
+      
+      if (dbKycSettings && Object.keys(dbKycSettings).length > 0) {
+        kycSettings = { ...kycSettings, ...dbKycSettings };
+      }
+    } catch (settingsError) {
+      logger.warn('⚠️ Settings not found, using defaults');
     }
 
     // Validation
@@ -37,17 +56,20 @@ exports.requestWithdrawal = async (req, res) => {
     }
 
     // Validate amount
-    if (amount < withdrawalSettings.minAmount) {
+    const minAmount = withdrawalSettings.minAmount || 100;
+    const maxAmount = withdrawalSettings.maxAmount || 100000;
+    
+    if (amount < minAmount) {
       return res.status(400).json({
         status: 'error',
-        message: `Minimum withdrawal amount is ₹${withdrawalSettings.minAmount}`,
+        message: `Minimum withdrawal amount is ₹${minAmount}`,
       });
     }
 
-    if (amount > withdrawalSettings.maxAmount) {
+    if (amount > maxAmount) {
       return res.status(400).json({
         status: 'error',
-        message: `Maximum withdrawal amount is ₹${withdrawalSettings.maxAmount}`,
+        message: `Maximum withdrawal amount is ₹${maxAmount}`,
       });
     }
 
@@ -75,15 +97,17 @@ exports.requestWithdrawal = async (req, res) => {
 
     // Check KYC if required
     if (kycSettings.requiredForWithdrawal && user.kycStatus !== 'approved') {
-      if (amount > kycSettings.maxAmountWithoutKYC) {
+      const maxWithoutKyc = kycSettings.maxAmountWithoutKYC || 5000;
+      if (amount > maxWithoutKyc) {
         return res.status(403).json({
           status: 'error',
-          message: `KYC verification required for withdrawals above ₹${kycSettings.maxAmountWithoutKYC}`,
+          message: `KYC verification required for withdrawals above ₹${maxWithoutKyc}`,
         });
       }
     }
 
     // Check daily limit
+    const dailyLimit = withdrawalSettings.dailyLimit || 3;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -93,10 +117,10 @@ exports.requestWithdrawal = async (req, res) => {
       status: { $nin: ['rejected', 'cancelled'] },
     });
 
-    if (todayWithdrawals >= withdrawalSettings.dailyLimit) {
+    if (todayWithdrawals >= dailyLimit) {
       return res.status(400).json({
         status: 'error',
-        message: `Daily withdrawal limit (${withdrawalSettings.dailyLimit}) reached`,
+        message: `Daily withdrawal limit (${dailyLimit}) reached`,
       });
     }
 
@@ -104,26 +128,27 @@ exports.requestWithdrawal = async (req, res) => {
     let balance = 0;
     switch (walletType) {
       case 'roi':
-        balance = parseFloat(wallet.roiBalance);
+        balance = parseFloat(wallet.roiBalance || 0);
         break;
       case 'referral':
-        balance = parseFloat(wallet.referralBalance);
+        balance = parseFloat(wallet.referralBalance || 0);
         break;
       case 'level':
-        balance = parseFloat(wallet.levelBalance);
+        balance = parseFloat(wallet.levelBalance || 0);
         break;
       case 'binary':
-        balance = parseFloat(wallet.binaryBalance);
+        balance = parseFloat(wallet.binaryBalance || 0);
         break;
       case 'main':
-        balance = parseFloat(wallet.mainBalance);
+        balance = parseFloat(wallet.mainBalance || 0);
         break;
       default:
-        balance = parseFloat(wallet.roiBalance);
+        balance = parseFloat(wallet.roiBalance || 0);
     }
 
     // Calculate fee and net amount
-    const fee = (amount * withdrawalSettings.feePercentage) / 100;
+    const feePercentage = withdrawalSettings.feePercentage || 5;
+    const fee = (amount * feePercentage) / 100;
     const netAmount = amount - fee;
 
     // Check sufficient balance
@@ -136,8 +161,8 @@ exports.requestWithdrawal = async (req, res) => {
 
     // Save original balance for rollback
     const originalBalance = balance;
-    const originalHoldBalance = parseFloat(wallet.holdBalance);
-    const originalPendingWithdrawal = parseFloat(wallet.pendingWithdrawal);
+    const originalHoldBalance = parseFloat(wallet.holdBalance || 0);
+    const originalPendingWithdrawal = parseFloat(wallet.pendingWithdrawal || 0);
 
     try {
       // Create withdrawal request
@@ -167,10 +192,11 @@ exports.requestWithdrawal = async (req, res) => {
       const transaction = await Transaction.create({
         userId,
         userCode: user.userCode,
+        transactionId: `WTH${Date.now()}${Math.floor(Math.random() * 1000)}`,
         type: 'withdraw_request',
-        amount,
+        amount: -amount,
         fee,
-        netAmount,
+        netAmount: -netAmount,
         walletType,
         balanceBefore: originalBalance,
         balanceAfter: originalBalance - amount,
@@ -180,7 +206,7 @@ exports.requestWithdrawal = async (req, res) => {
         },
       });
 
-      // Update withdrawal with transaction reference
+      // Link transaction to withdrawal
       withdrawal.transactionId = transaction._id;
       await withdrawal.save();
 
@@ -203,24 +229,27 @@ exports.requestWithdrawal = async (req, res) => {
           break;
       }
 
-      wallet.holdBalance += amount;
-      wallet.pendingWithdrawal += amount;
+      wallet.holdBalance = originalHoldBalance + amount;
+      wallet.pendingWithdrawal = originalPendingWithdrawal + amount;
       await wallet.save();
 
-      logger.info(`✅ Withdrawal requested: User ${user.userCode}, Amount ₹${amount}, Fee ${withdrawalSettings.feePercentage}%, ID ${withdrawal.withdrawalId}`);
+      const processingTime = withdrawalSettings.processingTime || '24-48 hours';
+      
+      logger.info(`✅ Withdrawal requested: User ${user.userCode}, Amount ₹${amount}, Fee ${feePercentage}%, ID ${withdrawal.withdrawalId}`);
 
       res.status(201).json({
         status: 'success',
-        message: `Withdrawal request submitted successfully. Processing time: ${withdrawalSettings.processingTime}`,
+        message: `Withdrawal request submitted successfully. Processing time: ${processingTime}`,
         data: {
           withdrawal: {
             withdrawalId: withdrawal.withdrawalId,
             amount: withdrawal.amount,
             fee: withdrawal.fee,
             netAmount: withdrawal.netAmount,
+            walletType: withdrawal.walletType,
             status: withdrawal.status,
             requestedAt: withdrawal.requestedAt,
-            estimatedProcessingTime: withdrawalSettings.processingTime,
+            estimatedProcessingTime: processingTime,
           },
         },
       });
@@ -317,7 +346,6 @@ exports.getMyWithdrawals = async (req, res) => {
   }
 };
 
-
 // Get single withdrawal
 exports.getWithdrawalById = async (req, res) => {
   try {
@@ -348,7 +376,6 @@ exports.getWithdrawalById = async (req, res) => {
     });
   }
 };
-
 
 // Cancel withdrawal
 exports.cancelWithdrawal = async (req, res) => {
@@ -423,16 +450,13 @@ exports.cancelWithdrawal = async (req, res) => {
   }
 };
 
-
 // ==================== ADMIN FUNCTIONS ====================
-
 
 // Get all withdrawals (Admin)
 exports.getAllWithdrawals = async (req, res) => {
   try {
     const { status, page = 1, limit = 20, userId, userCode } = req.query;
 
-    // Build filter
     const filter = {};
     if (status) filter.status = status;
     if (userId) filter.userId = userId;
@@ -440,7 +464,6 @@ exports.getAllWithdrawals = async (req, res) => {
 
     const skip = (page - 1) * limit;
 
-    // Get withdrawals
     const withdrawals = await Withdrawal.find(filter)
       .populate('userId', 'fullName email userCode')
       .populate('reviewedBy', 'fullName email')
@@ -451,7 +474,6 @@ exports.getAllWithdrawals = async (req, res) => {
 
     const total = await Withdrawal.countDocuments(filter);
 
-    // Get stats
     const stats = await Withdrawal.aggregate([
       {
         $group: {
@@ -485,6 +507,123 @@ exports.getAllWithdrawals = async (req, res) => {
   }
 };
 
+// ⭐ NEW: Get withdrawal statistics (Admin)
+// ⭐ IMPROVED: Get withdrawal statistics (Admin)
+exports.getWithdrawalStats = async (req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const stats = await Withdrawal.aggregate([
+      {
+        $facet: {
+          // Pending withdrawals
+          pending: [
+            { $match: { status: 'pending' } },
+            {
+              $group: {
+                _id: null,
+                count: { $sum: 1 },
+                totalAmount: { $sum: { $toDouble: '$amount' } },
+              },
+            },
+          ],
+          // Today's approved
+          todayApproved: [
+            {
+              $match: {
+                status: 'approved',
+                approvedAt: { $gte: today },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                count: { $sum: 1 },
+                totalAmount: { $sum: { $toDouble: '$amount' } },
+              },
+            },
+          ],
+          // Today's completed
+          todayCompleted: [
+            {
+              $match: {
+                status: 'completed',
+                completedAt: { $gte: today },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                count: { $sum: 1 },
+                totalAmount: { $sum: { $toDouble: '$amount' } },
+              },
+            },
+          ],
+          // Today's rejected
+          todayRejected: [
+            {
+              $match: {
+                status: 'rejected',
+                reviewedAt: { $gte: today },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          // All time totals
+          allTime: [
+            {
+              $group: {
+                _id: '$status',
+                count: { $sum: 1 },
+                totalAmount: { $sum: { $toDouble: '$amount' } },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    // ✅ CLEANED RESPONSE (Remove _id: null)
+    const cleanedData = {
+      pending: stats[0].pending[0] 
+        ? { count: stats[0].pending[0].count, totalAmount: stats[0].pending[0].totalAmount }
+        : { count: 0, totalAmount: 0 },
+      
+      todayApproved: stats[0].todayApproved[0]
+        ? { count: stats[0].todayApproved[0].count, totalAmount: stats[0].todayApproved[0].totalAmount }
+        : { count: 0, totalAmount: 0 },
+      
+      todayCompleted: stats[0].todayCompleted[0]
+        ? { count: stats[0].todayCompleted[0].count, totalAmount: stats[0].todayCompleted[0].totalAmount }
+        : { count: 0, totalAmount: 0 },
+      
+      todayRejected: stats[0].todayRejected[0]
+        ? { count: stats[0].todayRejected[0].count }
+        : { count: 0 },
+      
+      allTime: stats[0].allTime,
+    };
+
+    res.json({
+      status: 'success',
+      data: cleanedData,
+    });
+  } catch (error) {
+    logger.error('Get withdrawal stats error:', error);
+    res.json({
+      status: 'error',
+      message: 'Failed to fetch withdrawal statistics',
+      error: error.message,
+    });
+  }
+};
+
 
 // Approve withdrawal (Admin)
 exports.approveWithdrawal = async (req, res) => {
@@ -502,7 +641,6 @@ exports.approveWithdrawal = async (req, res) => {
       });
     }
 
-    // Can only approve pending withdrawals
     if (withdrawal.status !== 'pending') {
       return res.status(400).json({
         status: 'error',
@@ -510,14 +648,12 @@ exports.approveWithdrawal = async (req, res) => {
       });
     }
 
-    // Update withdrawal status
     withdrawal.status = 'approved';
     withdrawal.approvedBy = adminId;
     withdrawal.approvedAt = new Date();
     if (adminNote) withdrawal.adminNote = adminNote;
     await withdrawal.save();
 
-    // Update transaction status
     if (withdrawal.transactionId) {
       await Transaction.findByIdAndUpdate(withdrawal.transactionId, {
         status: 'approved',
@@ -543,7 +679,6 @@ exports.approveWithdrawal = async (req, res) => {
   }
 };
 
-
 // Reject withdrawal (Admin)
 exports.rejectWithdrawal = async (req, res) => {
   try {
@@ -567,7 +702,6 @@ exports.rejectWithdrawal = async (req, res) => {
       });
     }
 
-    // Can only reject pending or approved withdrawals
     if (!['pending', 'approved'].includes(withdrawal.status)) {
       return res.status(400).json({
         status: 'error',
@@ -575,7 +709,6 @@ exports.rejectWithdrawal = async (req, res) => {
       });
     }
 
-    // Get user's wallet
     const wallet = await Wallet.findOne({ userId: withdrawal.userId });
     const amount = parseFloat(withdrawal.amount);
 
@@ -602,14 +735,12 @@ exports.rejectWithdrawal = async (req, res) => {
     wallet.pendingWithdrawal -= amount;
     await wallet.save();
 
-    // Update withdrawal status
     withdrawal.status = 'rejected';
     withdrawal.reviewedBy = adminId;
     withdrawal.reviewedAt = new Date();
     withdrawal.rejectionReason = rejectionReason;
     await withdrawal.save();
 
-    // Update transaction
     if (withdrawal.transactionId) {
       await Transaction.findByIdAndUpdate(withdrawal.transactionId, {
         status: 'rejected',
@@ -634,7 +765,6 @@ exports.rejectWithdrawal = async (req, res) => {
   }
 };
 
-
 // Complete withdrawal (Admin - Mark as paid)
 exports.completeWithdrawal = async (req, res) => {
   try {
@@ -658,7 +788,6 @@ exports.completeWithdrawal = async (req, res) => {
       });
     }
 
-    // Can only complete approved withdrawals
     if (withdrawal.status !== 'approved') {
       return res.status(400).json({
         status: 'error',
@@ -666,17 +795,15 @@ exports.completeWithdrawal = async (req, res) => {
       });
     }
 
-    // Get user's wallet
     const wallet = await Wallet.findOne({ userId: withdrawal.userId });
     const amount = parseFloat(withdrawal.amount);
 
     // Move from hold to withdrawn
     wallet.holdBalance -= amount;
     wallet.pendingWithdrawal -= amount;
-    wallet.totalWithdrawn += amount;
+    wallet.totalWithdrawn = parseFloat(wallet.totalWithdrawn || 0) + amount;
     await wallet.save();
 
-    // Update withdrawal status
     withdrawal.status = 'completed';
     withdrawal.utrNumber = utrNumber;
     if (paymentProofUrl) withdrawal.paymentProofUrl = paymentProofUrl;
@@ -685,7 +812,6 @@ exports.completeWithdrawal = async (req, res) => {
     withdrawal.completedAt = new Date();
     await withdrawal.save();
 
-    // Update transaction
     if (withdrawal.transactionId) {
       await Transaction.findByIdAndUpdate(withdrawal.transactionId, {
         status: 'completed',

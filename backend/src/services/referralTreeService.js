@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 
+
 class ReferralTreeService {
 
   /**
@@ -26,9 +27,10 @@ class ReferralTreeService {
       }
 
       // Find sponsor
+      const queryOptions = session ? { session } : {};
       const sponsor = await User.findOne({ 
         userCode: sponsorCode.toUpperCase() 
-      }).session(session);
+      }, null, queryOptions);
       
       if (!sponsor) {
         throw new Error(`Sponsor code ${sponsorCode} not found`);
@@ -94,6 +96,8 @@ class ReferralTreeService {
     let currentUser = sponsor;
     let level = 1;
 
+    const queryOptions = session ? { session } : {};
+
     while (currentUser && level <= maxLevels) {
       uplineChain.push({
         userId: currentUser._id,
@@ -103,7 +107,7 @@ class ReferralTreeService {
 
       // Move to next upline
       if (currentUser.sponsorId) {
-        currentUser = await User.findById(currentUser.sponsorId).session(session);
+        currentUser = await User.findById(currentUser.sponsorId, null, queryOptions);
         level++;
       } else {
         break; // Reached root
@@ -124,27 +128,30 @@ class ReferralTreeService {
     let currentId = sponsorId;
     let level = 1;
 
+    const updateOptions = session ? { session, new: true } : { new: true };
+
     while (currentId && level <= 5) {
       const updateField = `teamCount.level${level}`;
       
-      await User.findByIdAndUpdate(
+      const updatedUser = await User.findByIdAndUpdate(
         currentId,
         { 
           $inc: { 
             [updateField]: 1,
             'teamCount.total': 1,
-            totalDirectReferrals: level === 1 ? 1 : 0, // Legacy
-            totalTeamSize: 1, // Legacy
+            totalDirectReferrals: level === 1 ? 1 : 0,
+            totalTeamSize: 1,
           }
         },
-        { session }
+        updateOptions
       );
 
-      logger.info(`Updated team count for level ${level}`);
+      if (updatedUser) {
+        logger.info(`✅ Updated ${updatedUser.userCode} team count level ${level}: ${updatedUser.teamCount[`level${level}`]}`);
+      }
 
       // Move to next upline
-      const user = await User.findById(currentId).session(session);
-      currentId = user?.sponsorId;
+      currentId = updatedUser?.sponsorId;
       level++;
     }
   }
@@ -158,13 +165,22 @@ class ReferralTreeService {
    */
   async findBinaryPlacement(sponsor, session) {
     try {
-      // Check sponsor's direct slots
-      const sponsorWithTeam = await User.findById(sponsor._id)
-        .select('userCode binaryTeam')
-        .session(session);
+      const queryOptions = session ? { session } : {};
+      
+      // Check if sponsor has DIRECT children (not count)
+      const leftChild = await User.findOne({
+        binaryParentId: sponsor._id,
+        binaryPosition: 'left',
+      }, null, queryOptions);
+
+      const rightChild = await User.findOne({
+        binaryParentId: sponsor._id,
+        binaryPosition: 'right',
+      }, null, queryOptions);
 
       // Left slot empty?
-      if (sponsorWithTeam.binaryTeam.leftCount === 0) {
+      if (!leftChild) {
+        logger.info(`Placing in LEFT slot of ${sponsor.userCode}`);
         return {
           parentId: sponsor._id,
           parentCode: sponsor.userCode,
@@ -173,7 +189,8 @@ class ReferralTreeService {
       }
 
       // Right slot empty?
-      if (sponsorWithTeam.binaryTeam.rightCount === 0) {
+      if (!rightChild) {
+        logger.info(`Placing in RIGHT slot of ${sponsor.userCode}`);
         return {
           parentId: sponsor._id,
           parentCode: sponsor.userCode,
@@ -182,7 +199,7 @@ class ReferralTreeService {
       }
 
       // Both slots filled, find spillover position
-      logger.info('Both slots filled, finding spillover...');
+      logger.info(`Both direct slots filled for ${sponsor.userCode}, finding spillover...`);
       return await this.findSpilloverPosition(sponsor._id, session);
 
     } catch (error) {
@@ -202,7 +219,9 @@ class ReferralTreeService {
     const queue = [rootId];
     const visited = new Set();
     let iterations = 0;
-    const maxIterations = 1000; // Prevent infinite loops
+    const maxIterations = 1000;
+
+    const queryOptions = session ? { session } : {};
 
     while (queue.length > 0 && iterations < maxIterations) {
       iterations++;
@@ -212,15 +231,23 @@ class ReferralTreeService {
       if (visited.has(currentId.toString())) continue;
       visited.add(currentId.toString());
 
-      const user = await User.findById(currentId)
-        .select('userCode binaryTeam')
-        .session(session);
-
+      const user = await User.findById(currentId).select('userCode');
       if (!user) continue;
 
+      // Check actual direct children, not counts
+      const leftChild = await User.findOne({
+        binaryParentId: currentId,
+        binaryPosition: 'left',
+      }, null, queryOptions);
+
+      const rightChild = await User.findOne({
+        binaryParentId: currentId,
+        binaryPosition: 'right',
+      }, null, queryOptions);
+
       // Check left slot
-      if (user.binaryTeam.leftCount === 0) {
-        logger.info(`Found spillover: left slot of ${user.userCode}`);
+      if (!leftChild) {
+        logger.info(`Found spillover: LEFT slot of ${user.userCode}`);
         return {
           parentId: currentId,
           parentCode: user.userCode,
@@ -229,8 +256,8 @@ class ReferralTreeService {
       }
 
       // Check right slot
-      if (user.binaryTeam.rightCount === 0) {
-        logger.info(`Found spillover: right slot of ${user.userCode}`);
+      if (!rightChild) {
+        logger.info(`Found spillover: RIGHT slot of ${user.userCode}`);
         return {
           parentId: currentId,
           parentCode: user.userCode,
@@ -238,12 +265,11 @@ class ReferralTreeService {
         };
       }
 
-      // Both slots filled, add children to queue
-      const children = await User.find({
-        binaryParentId: currentId,
-      }).select('_id').session(session);
+      // Both slots filled, add children to queue for BFS
+      queue.push(leftChild._id);
+      queue.push(rightChild._id);
 
-      children.forEach(child => queue.push(child._id));
+      logger.info(`BFS: ${user.userCode} full, added children to queue (${queue.length} remaining)`);
     }
 
     if (iterations >= maxIterations) {
@@ -264,13 +290,22 @@ class ReferralTreeService {
       ? 'binaryTeam.leftCount' 
       : 'binaryTeam.rightCount';
 
-    await User.findByIdAndUpdate(
+    const updateOptions = session ? { session, new: true } : { new: true };
+
+    const updatedParent = await User.findByIdAndUpdate(
       parentId,
       { $inc: { [updateField]: 1 } },
-      { session }
+      updateOptions
     );
 
-    logger.info(`Updated binary parent: ${position} count +1`);
+    if (updatedParent) {
+      const countValue = position === 'left' 
+        ? updatedParent.binaryTeam.leftCount 
+        : updatedParent.binaryTeam.rightCount;
+      logger.info(`✅ Updated ${updatedParent.userCode}: ${position} count = ${countValue}`);
+    } else {
+      logger.error(`❌ Failed to update binary parent count for ${parentId}`);
+    }
   }
 
   /**

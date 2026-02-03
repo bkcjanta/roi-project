@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 
+
 const commissionSchema = new mongoose.Schema(
   {
     // Commission ID
@@ -8,6 +9,7 @@ const commissionSchema = new mongoose.Schema(
       unique: true,
       required: true,
     },
+
 
     // ==================== WHO RECEIVES ====================
     
@@ -18,10 +20,12 @@ const commissionSchema = new mongoose.Schema(
       index: true,
     },
 
+
     userCode: {
       type: String,
       required: true,
     },
+
 
     // ==================== WHO GENERATED ====================
     
@@ -31,19 +35,22 @@ const commissionSchema = new mongoose.Schema(
       required: true,
     },
 
+
     fromUserCode: {
       type: String,
       required: true,
     },
 
+
     // ==================== COMMISSION TYPE ====================
     
     type: {
       type: String,
-      enum: ['level', 'binary', 'direct_referral', 'matching'],
+      enum: ['level', 'binary', 'directreferral', 'matching'],  // ✅ CHANGED (removed underscore)
       required: true,
       index: true,
     },
+
 
     // ==================== AMOUNT DETAILS ====================
     
@@ -53,10 +60,12 @@ const commissionSchema = new mongoose.Schema(
       get: (v) => parseFloat(v?.toString() || 0),
     },
 
+
     percentage: {
       type: Number, // e.g., 10 for 10%
       required: true,
     },
+
 
     // ==================== LEVEL INCOME SPECIFIC ====================
     
@@ -65,6 +74,7 @@ const commissionSchema = new mongoose.Schema(
       min: 1,
       max: 10,
     },
+
 
     // ==================== BINARY INCOME SPECIFIC ====================
     
@@ -84,6 +94,7 @@ const commissionSchema = new mongoose.Schema(
       },
     },
 
+
     // ==================== SOURCE ====================
     
     sourceType: {
@@ -92,16 +103,19 @@ const commissionSchema = new mongoose.Schema(
       required: true,
     },
 
+
     sourceId: {
       type: mongoose.Schema.Types.ObjectId,
       required: true,
     },
+
 
     sourceAmount: {
       type: mongoose.Schema.Types.Decimal128,
       required: true,
       get: (v) => parseFloat(v?.toString() || 0),
     },
+
 
     // ==================== STATUS ====================
     
@@ -112,19 +126,22 @@ const commissionSchema = new mongoose.Schema(
       index: true,
     },
 
+
     // ==================== PAYMENT DETAILS ====================
     
     paidAt: Date,
+
 
     paidBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
     },
 
+
     transactionId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Transaction',
+      type: String,  // ✅ CHANGED from ObjectId to String
     },
+
 
     // ==================== ADMIN ACTIONS ====================
     
@@ -133,18 +150,24 @@ const commissionSchema = new mongoose.Schema(
       ref: 'User',
     },
 
+
     approvedAt: Date,
+
 
     rejectedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
     },
 
+
     rejectedAt: Date,
+
 
     rejectionReason: String,
 
+
     adminNote: String,
+
 
     // ==================== METADATA ====================
     
@@ -152,6 +175,8 @@ const commissionSchema = new mongoose.Schema(
       ipAddress: String,
       userAgent: String,
       notes: String,
+      packageName: String,  // ✅ ADDED
+      note: String,         // ✅ ADDED
     },
   },
   {
@@ -161,7 +186,9 @@ const commissionSchema = new mongoose.Schema(
   }
 );
 
+
 // ==================== INDEXES ====================
+
 
 commissionSchema.index({ userId: 1, type: 1, status: 1 });
 commissionSchema.index({ fromUserId: 1, createdAt: -1 });
@@ -169,7 +196,9 @@ commissionSchema.index({ commissionId: 1 }, { unique: true });
 commissionSchema.index({ status: 1, createdAt: -1 });
 commissionSchema.index({ transactionId: 1 });
 
+
 // ==================== PRE-SAVE HOOK ====================
+
 
 commissionSchema.pre('save', function (next) {
   if (this.isNew && !this.commissionId) {
@@ -182,11 +211,14 @@ commissionSchema.pre('save', function (next) {
   next();
 });
 
+
 // ==================== VIRTUAL FIELDS ====================
+
 
 commissionSchema.virtual('id').get(function () {
   return this._id.toHexString();
 });
+
 
 commissionSchema.virtual('statusDisplay').get(function () {
   const statusMap = {
@@ -199,7 +231,9 @@ commissionSchema.virtual('statusDisplay').get(function () {
   return statusMap[this.status] || this.status;
 });
 
+
 // ==================== STATIC METHODS ====================
+
 
 // Get total commission by user and type
 commissionSchema.statics.getTotalByUser = async function (userId, type, status = 'paid') {
@@ -220,8 +254,10 @@ commissionSchema.statics.getTotalByUser = async function (userId, type, status =
     },
   ]);
 
+
   return result[0] || { total: 0, count: 0 };
 };
+
 
 // Get level-wise breakdown
 commissionSchema.statics.getLevelWiseStats = async function (userId) {
@@ -243,5 +279,6 @@ commissionSchema.statics.getLevelWiseStats = async function (userId) {
     { $sort: { _id: 1 } },
   ]);
 };
+
 
 module.exports = mongoose.model('Commission', commissionSchema);

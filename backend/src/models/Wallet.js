@@ -9,6 +9,14 @@ const walletSchema = new mongoose.Schema(
       unique: true,
     },
     
+    // ✅ ADD THIS
+    userCode: {
+      type: String,
+      required: true,
+      uppercase: true,
+      index: true,
+    },
+    
     // Wallet Balances
     mainBalance: {
       type: mongoose.Schema.Types.Decimal128,
@@ -146,6 +154,7 @@ const walletSchema = new mongoose.Schema(
 
 // ==================== INDEXES ====================
 walletSchema.index({ userId: 1 }, { unique: true });
+walletSchema.index({ userCode: 1 });  // ✅ ADD INDEX
 walletSchema.index({ isLocked: 1 });
 
 module.exports = mongoose.model('Wallet', walletSchema);

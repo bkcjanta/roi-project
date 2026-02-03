@@ -410,50 +410,59 @@ investment-platform/
 │   │   │   ├── AuditLog.js                     # Audit log schema
 │   │   │   ├── CronJob.js                      # Cron job tracking schema
 │   │   │   └── SystemSetting.js                # System settings schema
+|   |   |   |-- Commission.js                   # Commission settings schema
+|   |   |   └── IncomeDistributionLog.js        # Income distribution log schema
+|   |   |   |    SystemTicket.js                # System support ticket schema
 │   │   │
 │   │   ├── controllers/
-│   │   │   ├── auth.controller.js              # Auth endpoints
-│   │   │   ├── user.controller.js              # User profile endpoints
-│   │   │   ├── wallet.controller.js            # Wallet operations
-│   │   │   ├── investment.controller.js        # Investment operations
-│   │   │   ├── transaction.controller.js       # Transaction history
-│   │   │   ├── income.controller.js            # Income endpoints
-│   │   │   ├── withdrawal.controller.js        # Withdrawal requests
-│   │   │   ├── kyc.controller.js               # KYC submission/review
-│   │   │   ├── notification.controller.js      # Notifications
-│   │   │   ├── support.controller.js           # Support tickets
-│   │   │   └── admin.controller.js             # Admin operations
-│   │   │
+│   │   │   ├── authController.js              # Auth endpoints
+│   │   │   ├── userController.js              # User profile endpoints
+│   │   │   ├── walletController.js            # Wallet operations
+│   │   │   ├── investmentController.js        # Investment operations
+│   │   │   ├── transactionController.js       # Transaction history
+│   │   │   ├── incomeController.js            # Income endpoints
+│   │   │   ├── withdrawalController.js        # Withdrawal requests
+│   │   │   ├── kycController.js               # KYC submission/review
+│   │   │   ├── notificationController.js      # Notifications
+│   │   │   ├── supportController.js           # Support tickets
+│   │   │   └── adminController.js             # Admin operations
+|   |   |   |   commissionController.js         # Commission management
+|   |   |       packageController.js            # Package management
+│   │   │   |   referralController.js           # Referral management
+│   │   │   |   withdrawalAdminController.js     # Admin withdrawal actions
+│   │   │   └── roiController.js                      # Cron job management
+|   |   |   |   systemSettingsController.js            # System settings management
+|   │   │   |   supportController.js                  # Support ticket management
 │   │   ├── services/
-│   │   │   ├── auth.service.js                 # Auth business logic
-│   │   │   ├── wallet.service.js               # Wallet business logic
-│   │   │   ├── investment.service.js           # Investment business logic
-│   │   │   ├── roi.service.js                  # ROI calculation logic
-│   │   │   ├── income.service.js               # Income distribution logic
-│   │   │   ├── referral.service.js             # Referral income logic
-│   │   │   ├── level.service.js                # Level income logic
-│   │   │   ├── binaryTree.service.js           # Binary tree operations
-│   │   │   ├── binaryIncome.service.js         # Binary income calculation
-│   │   │   ├── withdrawal.service.js           # Withdrawal processing
-│   │   │   ├── kyc.service.js                  # KYC processing
-│   │   │   ├── notification.service.js         # Notification creation
-│   │   │   ├── email.service.js                # Email sending
-│   │   │   ├── sms.service.js                  # SMS sending
-│   │   │   ├── upload.service.js               # File upload (S3/Cloudinary)
-│   │   │   └── transaction.service.js          # Transaction logging
+│   │   │   ├── authService.js                 # Auth business logic
+│   │   │   ├── walletService.js               # Wallet business logic
+│   │   │   ├── investmentService.js           # Investment business logic
+│   │   │   ├── roiService.js                  # ROI calculation logic
+│   │   │   ├── incomeService.js               # Income distribution logic
+│   │   │   ├── referralService.js             # Referral income logic
+│   │   │   ├── levelService.js                # Level income logic
+│   │   │   ├── binaryTreeService.js           # Binary tree operations
+│   │   │   ├── binaryIncomeService.js         # Binary income calculation
+│   │   │   ├── withdrawalService.js           # Withdrawal processing
+│   │   │   ├── kycService.js                  # KYC processing
+│   │   │   ├── notificationService.js         # Notification creation
+│   │   │   ├── emailService.js                # Email sending
+│   │   │   ├── smsService.js                  # SMS sending
+│   │   │   ├── uploadService.js               # File upload (S3/Cloudinary)
+│   │   │   └── transactionService.js          # Transaction logging
 │   │   │
 │   │   ├── middleware/
-│   │   │   ├── auth.middleware.js              # JWT verification
-│   │   │   ├── rbac.middleware.js              # Role-based access control
-│   │   │   ├── validation.middleware.js        # Request validation
-│   │   │   ├── rateLimit.middleware.js         # Rate limiting
-│   │   │   ├── idempotency.middleware.js       # Prevent duplicate requests
-│   │   │   ├── audit.middleware.js             # Audit logging
-│   │   │   ├── helmet.middleware.js            # Security headers
-│   │   │   ├── cors.middleware.js              # CORS configuration
-│   │   │   ├── sanitize.middleware.js          # Input sanitization
-│   │   │   ├── errorHandler.middleware.js      # Global error handler
-│   │   │   └── logger.middleware.js            # Request logging
+│   │   │   ├── authMiddleware.js              # JWT verification
+│   │   │   ├── rbacMiddleware.js              # Role-based access control
+│   │   │   ├── validationMiddleware.js        # Request validation
+│   │   │   ├── rateLimitMiddleware.js         # Rate limiting
+│   │   │   ├── idempotencyMiddleware.js       # Prevent duplicate requests
+│   │   │   ├── auditMiddleware.js             # Audit logging
+│   │   │   ├── helmetMiddleware.js            # Security headers
+│   │   │   ├── corsMiddleware.js              # CORS configuration
+│   │   │   ├── sanitizeMiddleware.js          # Input sanitization
+│   │   │   ├── errorHandlerMiddleware.js      # Global error handler
+│   │   │   └── loggerMiddleware.js            # Request logging
 │   │   │
 │   │   ├── routes/
 │   │   │   ├── index.js                        # Main router

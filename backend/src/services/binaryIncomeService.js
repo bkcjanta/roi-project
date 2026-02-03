@@ -74,7 +74,7 @@ class BinaryIncomeService {
 
   /**
    * ✅ CRON JOB: Calculate binary income for all users
-   * Runs daily at 11:59 PM
+   * Runs daily at 1:00 AM IST
    */
   async calculateDailyBinary() {
     try {
@@ -83,16 +83,34 @@ class BinaryIncomeService {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      const settings = await SettingsHelper.getByPrefix('binary');
+      // Get settings with fallback
+      let binarySettings = {
+        enabled: true,
+        pairValue: 1000,
+        commissionPerPair: 100,
+        dailyCap: 50000,
+      };
 
-      if (!settings.enabled) {
-        logger.info('⚠️ Binary income disabled');
-        return { success: true, processed: 0 };
+      try {
+        const settings = await SettingsHelper.getByPrefix('binary');
+        if (settings) {
+          binarySettings = {
+            enabled: settings.enabled !== false,
+            pairValue: parseFloat(settings.pairValue || 1000),
+            commissionPerPair: parseFloat(settings.commissionPerPair || 100),
+            dailyCap: parseFloat(settings.dailyCap || 50000),
+          };
+        }
+      } catch (settingsError) {
+        logger.warn('⚠️ Settings not found, using defaults');
       }
 
-      const pairValue = parseFloat(settings.pairValue || 1000);
-      const commissionPerPair = parseFloat(settings.commissionPerPair || 100);
-      const dailyCap = parseFloat(settings.dailyCap || 50000);
+      if (!binarySettings.enabled) {
+        logger.info('⚠️ Binary income disabled');
+        return { success: true, processed: 0, message: 'Disabled' };
+      }
+
+      const { pairValue, commissionPerPair, dailyCap } = binarySettings;
 
       logger.info(`Settings: Pair=₹${pairValue}, Commission=₹${commissionPerPair}, Cap=₹${dailyCap}`);
 
@@ -106,7 +124,7 @@ class BinaryIncomeService {
         ],
       }).select('userCode binaryTeam');
 
-      logger.info(`Found ${users.length} users for binary calculation`);
+      logger.info(`Found ${users.length} users for calculation`);
 
       let processed = 0;
       let totalCommission = 0;
@@ -133,12 +151,12 @@ class BinaryIncomeService {
         }
       }
 
-      logger.info(`🎉 Binary calculation complete: ${processed} users, ₹${totalCommission}, ${errors} errors`);
+      logger.info(`🎉 Complete: ${processed} users, ₹${totalCommission.toFixed(2)}, ${errors} errors`);
 
       return { 
         success: true, 
         processed, 
-        totalCommission,
+        totalCommission: parseFloat(totalCommission.toFixed(2)),
         errors,
         total: users.length,
       };
@@ -150,13 +168,14 @@ class BinaryIncomeService {
   }
 
   /**
-   * Calculate binary for single user
+   * ✅ Calculate binary for single user WITH WALLET UPDATE
    */
   async calculateUserBinary(user, cycleDate, pairValue, commissionPerPair, dailyCap) {
     const session = await mongoose.startSession();
     session.startTransaction();
 
     try {
+      // === STEP 1: Calculate Binary Income ===
       const previousCarry = user.binaryTeam.carryForward || { left: 0, right: 0 };
       const prevLeft = parseFloat(previousCarry.left || 0);
       const prevRight = parseFloat(previousCarry.right || 0);
@@ -190,7 +209,32 @@ class BinaryIncomeService {
         right: totalRight > totalLeft ? totalRight - usedBusiness : 0,
       };
 
+      const transactionId = `BIN${Date.now()}${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+      logger.info(`💰 ${user.userCode}: ${pairsMatched} pairs × ₹${commissionPerPair} = ₹${finalCommission}`);
+
+      // === STEP 2: Update Wallet (CRITICAL!) ===
+      const wallet = await Wallet.findOne({ userId: user._id }).session(session);
+      
+      if (!wallet) {
+        throw new Error(`Wallet not found for user ${user.userCode}`);
+      }
+
+      const balanceBefore = parseFloat(wallet.binaryBalance || 0);
+      const balanceAfter = balanceBefore + finalCommission; // ✅ Explicit variable
+
+      wallet.binaryBalance = balanceAfter;
+      wallet.totalBinaryIncome = parseFloat(wallet.totalBinaryIncome || 0) + finalCommission;
+      wallet.totalEarnings = parseFloat(wallet.totalEarnings || 0) + finalCommission;
+      wallet.updatedAt = new Date();
+      
+      await wallet.save({ session });
+
+      logger.info(`✅ Wallet: ₹${balanceBefore} → ₹${balanceAfter}`); // ✅ Added logging
+
+      // === STEP 3: Create Binary Transaction ===
       const binaryTxn = await BinaryTransaction.create([{
+        transactionId: transactionId,
         userId: user._id,
         userCode: user.userCode,
         cycleDate: cycleDate,
@@ -207,22 +251,30 @@ class BinaryIncomeService {
         cappingLimit: dailyCap,
         finalCommission: finalCommission,
         newCarryForward: newCarryForward,
-        status: 'calculated',
+        status: 'completed',
+        processedAt: new Date(),
         metadata: {
           totalLeftMembers: user.binaryTeam.leftCount,
           totalRightMembers: user.binaryTeam.rightCount,
           weakerLeg: totalLeft < totalRight ? 'left' : 'right',
           strongerLeg: totalLeft > totalRight ? 'left' : 'right',
+          walletBalanceBefore: balanceBefore,  // ✅ Added
+          walletBalanceAfter: balanceAfter,    // ✅ Added
         },
+        createdAt: new Date(),
+        updatedAt: new Date(),
       }], { session });
 
+      // === STEP 4: Update User Binary Stats ===
       user.binaryTeam.leftBusiness = 0;
       user.binaryTeam.rightBusiness = 0;
       user.binaryTeam.carryForward = newCarryForward;
       user.binaryTeam.totalPairs += pairsMatched;
       await user.save({ session });
 
+      // === STEP 5: Create Commission ===
       const commission = await Commission.create([{
+        commissionId: `COM-BIN${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
         userId: user._id,
         userCode: user.userCode,
         fromUserId: user._id,
@@ -233,28 +285,70 @@ class BinaryIncomeService {
         sourceType: 'binary_pairing',
         sourceId: binaryTxn[0]._id,
         sourceAmount: usedBusiness,
-        status: 'approved',
-        binaryInfo: {
+        status: 'paid',
+        paidAt: new Date(),
+        transactionId: transactionId,
+        metadata: {
           leftBusiness: totalLeft,
           rightBusiness: totalRight,
           pairs: pairsMatched,
           pairValue: usedBusiness,
+          carryLeft: newCarryForward.left,      // ✅ Added
+          carryRight: newCarryForward.right,    // ✅ Added
+          cappingApplied: cappingApplied,       // ✅ Added
+          grossCommission: grossCommission,     // ✅ Added
         },
+        createdAt: new Date(),
+        updatedAt: new Date(),
       }], { session });
 
+      // === STEP 6: Create Transaction ===
+      await Transaction.create([{
+        transactionId: transactionId,
+        userId: user._id,
+        userCode: user.userCode,
+        type: 'binary_income',
+        amount: finalCommission,
+        fee: 0,
+        netAmount: finalCommission,
+        walletType: 'binary',
+        balanceBefore: balanceBefore,
+        balanceAfter: balanceAfter,
+        status: 'completed',
+        metadata: {
+          leftBusiness: totalLeft,
+          rightBusiness: totalRight,
+          pairValue: usedBusiness,
+          pairs: pairsMatched,
+          percentage: (commissionPerPair / pairValue) * 100,
+          carryLeft: newCarryForward.left,
+          carryRight: newCarryForward.right,
+          binaryTransactionId: binaryTxn[0]._id,
+          commissionId: commission[0]._id,
+          cappingApplied: cappingApplied,
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }], { session });
+
+      // === STEP 7: Link Records ===
       binaryTxn[0].commissionId = commission[0]._id;
       await binaryTxn[0].save({ session });
 
       await session.commitTransaction();
 
+      logger.info(`🎉 ${user.userCode}: Completed successfully!`);
+
       return { 
         commission: finalCommission, 
         pairs: pairsMatched,
         carryForward: newCarryForward,
+        walletBalance: balanceAfter,
       };
 
     } catch (error) {
       await session.abortTransaction();
+      logger.error(`❌ Binary failed for ${user.userCode}:`, error.message); // ✅ Enhanced error
       throw error;
     } finally {
       session.endSession();
@@ -262,34 +356,39 @@ class BinaryIncomeService {
   }
 
   /**
-   * ✅ SETUP CRON JOB
-   * Runs daily at 11:59 PM IST
+   * ✅ SETUP CRON JOB - Runs daily at 1:00 AM IST
    */
   startCronJob() {
-    // Cron expression: '59 23 * * *' = Every day at 11:59 PM
-    cron.schedule('59 23 * * *', async () => {
-      logger.info('⏰ Binary cron job triggered at 11:59 PM');
+    cron.schedule('0 1 * * *', async () => {
+      const startTime = new Date();
+      logger.info('⏰ Binary cron started:', startTime.toISOString());
+      
       try {
-        await this.calculateDailyBinary();
+        const result = await this.calculateDailyBinary();
+        
+        const duration = ((new Date() - startTime) / 1000).toFixed(2);
+        logger.info(`✅ Binary cron completed in ${duration}s:`, result);
+        
       } catch (error) {
-        logger.error('❌ Binary cron job failed:', error);
+        logger.error('❌ Binary cron failed:', error);
       }
     }, {
-      timezone: 'Asia/Kolkata' // IST timezone
+      timezone: 'Asia/Kolkata',
+      scheduled: true,
     });
 
-    logger.info('✅ Binary cron job scheduled: Daily at 11:59 PM IST');
+    logger.info('✅ Binary cron scheduled: Daily at 1:00 AM IST');
+    return true;
   }
 
   /**
-   * ✅ MANUAL TRIGGER (for testing/admin)
+   * ✅ Manual trigger for testing
    */
   async manualTrigger() {
     logger.info('🔧 Manual binary calculation triggered');
     return await this.calculateDailyBinary();
   }
 
-  // Additional methods...
   async getUserBinaryHistory(userId, options = {}) {
     try {
       const { page = 1, limit = 20, status } = options;
@@ -308,7 +407,7 @@ class BinaryIncomeService {
         { 
           $match: { 
             userId: new mongoose.Types.ObjectId(userId),
-            status: 'paid',
+            status: 'completed',
           } 
         },
         {
@@ -346,7 +445,7 @@ class BinaryIncomeService {
         { 
           $match: { 
             userId: new mongoose.Types.ObjectId(userId),
-            status: 'paid',
+            status: 'completed',
           } 
         },
         {
@@ -359,8 +458,6 @@ class BinaryIncomeService {
         },
       ]);
 
-      const pending = await Commission.getTotalByUser(userId, 'binary', 'approved');
-
       return {
         currentBusiness: {
           left: user.binaryTeam.leftBusiness,
@@ -369,7 +466,6 @@ class BinaryIncomeService {
         carryForward: user.binaryTeam.carryForward,
         totalPairs: user.binaryTeam.totalPairs,
         totalEarned: totalStats[0]?.totalEarned || 0,
-        pendingAmount: pending.total,
         teamCount: {
           left: user.binaryTeam.leftCount,
           right: user.binaryTeam.rightCount,

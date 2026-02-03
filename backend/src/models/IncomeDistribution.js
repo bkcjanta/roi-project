@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const IncomeDistribution = require('../models/IncomeDistribution');
+
 
 
 const incomeDistributionSchema = new mongoose.Schema(

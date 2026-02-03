@@ -6,6 +6,7 @@ const config = require('../config/environment');
 const logger = require('../utils/logger');
 const referralTreeService = require('../services/referralTreeService');
 
+
 // Helper: Generate access token
 const generateToken = (userId, role) => {
   return jwt.sign({ id: userId, role }, config.JWT_SECRET, {
@@ -13,12 +14,14 @@ const generateToken = (userId, role) => {
   });
 };
 
+
 // Helper: Generate refresh token
 const generateRefreshToken = (userId) => {
   return jwt.sign({ id: userId }, config.JWT_REFRESH_SECRET || config.JWT_SECRET, {
     expiresIn: '30d',
   });
 };
+
 
 // Helper: Generate unique user code
 const generateUniqueUserCode = async () => {
@@ -35,6 +38,7 @@ const generateUniqueUserCode = async () => {
   return code;
 };
 
+
 // Helper: Generate unique referral code
 const generateUniqueReferralCode = async () => {
   let code;
@@ -49,10 +53,26 @@ const generateUniqueReferralCode = async () => {
   return code;
 };
 
+
 // ==================== REGISTER USER ====================
 exports.register = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  // ✅ FORCE DISABLE transactions via environment variable
+  const useTransactions = process.env.USE_TRANSACTIONS === 'true';
+  
+  let session = null;
+
+  if (useTransactions) {
+    try {
+      session = await mongoose.startSession();
+      session.startTransaction();
+      logger.info('🔄 Using transactions (Enabled via config)');
+    } catch (error) {
+      logger.warn('⚠️  Failed to start transaction, continuing without it');
+      session = null;
+    }
+  } else {
+    logger.warn('⚠️  Transactions disabled (Local development mode)');
+  }
 
   try {
     const { 
@@ -62,14 +82,14 @@ exports.register = async (req, res) => {
       firstName, 
       middleName,
       lastName, 
-      sponsorCode, // ✅ NEW: Referral/Sponsor code
+      sponsorCode,
       dateOfBirth,
       gender,
     } = req.body;
 
     // Validate required fields
     if (!email || !mobile || !password || !firstName || !lastName) {
-      await session.abortTransaction();
+      if (session) await session.abortTransaction();
       return res.status(400).json({
         status: 'error',
         message: 'Please provide all required fields',
@@ -79,10 +99,10 @@ exports.register = async (req, res) => {
     // Check existing user
     const existingUser = await User.findOne({ 
       $or: [{ email }, { mobile }] 
-    }).session(session);
+    });
 
     if (existingUser) {
-      await session.abortTransaction();
+      if (session) await session.abortTransaction();
       return res.status(400).json({
         status: 'error',
         message: existingUser.email === email 
@@ -95,10 +115,10 @@ exports.register = async (req, res) => {
     if (sponsorCode) {
       const sponsor = await User.findOne({ 
         userCode: sponsorCode.toUpperCase() 
-      }).session(session);
+      });
 
       if (!sponsor) {
-        await session.abortTransaction();
+        if (session) await session.abortTransaction();
         return res.status(400).json({
           status: 'error',
           message: 'Invalid sponsor code',
@@ -128,7 +148,7 @@ exports.register = async (req, res) => {
       registrationDevice: req.get('user-agent'),
     });
 
-    // ✅ NEW: Build referral & binary tree
+    // ✅ Build referral & binary tree (without session for now)
     let treeData = { uplineChain: [], binaryPlacement: null, isRoot: true };
     
     if (sponsorCode) {
@@ -136,7 +156,7 @@ exports.register = async (req, res) => {
         treeData = await referralTreeService.buildTreeOnRegistration(
           user,
           sponsorCode,
-          session
+          null // Pass null instead of session for local testing
         );
 
         logger.info(`✅ Tree built for ${user.userCode}:`, {
@@ -144,7 +164,7 @@ exports.register = async (req, res) => {
           binaryPosition: treeData.binaryPlacement?.position,
         });
       } catch (treeError) {
-        await session.abortTransaction();
+        if (session) await session.abortTransaction();
         logger.error('Tree building failed:', treeError);
         return res.status(400).json({
           status: 'error',
@@ -153,23 +173,26 @@ exports.register = async (req, res) => {
       }
     }
 
-    // Save user (with tree data already set)
-    await user.save({ session });
+    // Save user
+    await user.save();
 
     // Create wallet
-    const wallet = await Wallet.create([{
+    const wallet = await Wallet.create({
       userId: user._id,
       userCode: user.userCode,
-    }], { session });
+    });
 
     // Link wallet to user
-    user.wallets.main = wallet[0]._id;
-    user.wallets.income = wallet[0]._id;
-    user.wallets.roi = wallet[0]._id;
-    await user.save({ session });
+    user.wallets.main = wallet._id;
+    user.wallets.income = wallet._id;
+    user.wallets.roi = wallet._id;
+    await user.save();
 
-    // Commit transaction
-    await session.commitTransaction();
+    // ✅ Commit transaction if using
+    if (session) {
+      await session.commitTransaction();
+      logger.info('✅ Transaction committed');
+    }
 
     // Generate tokens
     const token = generateToken(user._id, user.role);
@@ -199,7 +222,7 @@ exports.register = async (req, res) => {
     });
 
   } catch (error) {
-    await session.abortTransaction();
+    if (session) await session.abortTransaction();
     logger.error('Registration error:', error);
     res.status(500).json({
       status: 'error',
@@ -207,16 +230,16 @@ exports.register = async (req, res) => {
       error: error.message,
     });
   } finally {
-    session.endSession();
+    if (session) session.endSession();
   }
 };
+
 
 // ==================== LOGIN USER ====================
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Validate input
     if (!email || !password) {
       return res.status(400).json({
         status: 'error',
@@ -224,7 +247,6 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Find user with password
     const user = await User.findOne({ email }).select('+password');
     if (!user) {
       return res.status(401).json({
@@ -233,7 +255,6 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Check account lock
     if (user.isLocked()) {
       return res.status(423).json({
         status: 'error',
@@ -241,7 +262,6 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Check account status
     if (user.accountStatus !== 'active') {
       return res.status(403).json({
         status: 'error',
@@ -249,7 +269,6 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Verify password
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
       await user.incrementLoginAttempts();
@@ -259,16 +278,13 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Reset login attempts
     await user.resetLoginAttempts();
 
-    // Update login info
     await User.findByIdAndUpdate(user._id, {
       lastLogin: new Date(),
       lastLoginIp: req.ip,
     });
 
-    // Generate tokens
     const token = generateToken(user._id, user.role);
     const refreshToken = generateRefreshToken(user._id);
 
@@ -302,6 +318,7 @@ exports.login = async (req, res) => {
     });
   }
 };
+
 
 // ==================== GET CURRENT USER ====================
 exports.getCurrentUser = async (req, res) => {
@@ -339,6 +356,7 @@ exports.getCurrentUser = async (req, res) => {
   }
 };
 
+
 // ==================== LOGOUT ====================
 exports.logout = async (req, res) => {
   try {
@@ -356,6 +374,7 @@ exports.logout = async (req, res) => {
     });
   }
 };
+
 
 // ==================== REFRESH TOKEN ====================
 exports.refreshToken = async (req, res) => {
@@ -397,6 +416,7 @@ exports.refreshToken = async (req, res) => {
     });
   }
 };
+
 
 // ==================== CHANGE PASSWORD ====================
 exports.changePassword = async (req, res) => {

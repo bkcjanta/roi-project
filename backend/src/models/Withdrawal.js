@@ -6,7 +6,6 @@ const withdrawalSchema = new mongoose.Schema(
     withdrawalId: {
       type: String,
       unique: true,
-      // ✅ REMOVE required: true (will be generated in pre-save)
     },
     
     userId: {
@@ -117,7 +116,7 @@ const withdrawalSchema = new mongoose.Schema(
     paymentProofUrl: String,
     processedAt: Date,
     
-    // Transaction Reference
+    // Transaction Reference (✅ ObjectId)
     transactionId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Transaction',

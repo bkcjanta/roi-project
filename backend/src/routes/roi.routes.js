@@ -1,16 +1,30 @@
 const express = require('express');
 const router = express.Router();
-const { protect, adminOnly } = require('../middleware/authMiddleware');
 const roiController = require('../controllers/roiController');
-
-// ==================== USER ROUTES ====================
-
-// Get own ROI history
-router.get('/history', protect, roiController.getROIHistory);
+const { protect, restrictTo } = require('../middleware/authMiddleware');
 
 // ==================== ADMIN ROUTES ====================
+// Manual ROI distribution trigger (Admin only)
+router.post(
+  '/trigger',
+  protect,
+  restrictTo('admin', 'superadmin'),
+  roiController.triggerROIDistribution
+);
 
-// Manual ROI distribution (admin only)
-router.post('/distribute', protect, adminOnly, roiController.triggerROIDistribution);
+// ==================== USER ROUTES ====================
+// Get user's ROI history
+router.get(
+  '/history',
+  protect,
+  roiController.getROIHistory
+);
+
+// Get ROI summary/dashboard
+router.get(
+  '/summary',
+  protect,
+  roiController.getROISummary
+);
 
 module.exports = router;

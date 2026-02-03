@@ -7,6 +7,7 @@ const IncomeDistribution = require('../models/IncomeDistribution');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 
+
 class RoiService {
   
   // Main function to distribute daily ROI
@@ -22,7 +23,7 @@ class RoiService {
       const investments = await Investment.find({
         status: 'active',
         nextRoiDate: { $lte: now },
-      }).populate('userId packageId');
+      }).populate('userId', 'userCode email fullName');
 
       logger.info(`📊 Found ${investments.length} investments eligible for ROI`);
 
@@ -57,7 +58,7 @@ class RoiService {
         try {
           await this.processInvestmentROI(investment);
           successCount++;
-          totalRoiDistributed += investment.dailyRoiAmount;
+          totalRoiDistributed += parseFloat(investment.dailyRoiAmount);
         } catch (error) {
           logger.error(`❌ Failed to process investment ${investment._id}:`, error.message);
           failCount++;
@@ -85,132 +86,136 @@ class RoiService {
   }
 
   // Process individual investment ROI
- // Process individual investment ROI
-async processInvestmentROI(investment) {
-  const user = await User.findById(investment.userId);
-  const wallet = await Wallet.findOne({ userId: investment.userId });
-
-  if (!user) {
-    throw new Error('User not found');
-  }
-
-  if (!wallet) {
-    throw new Error('Wallet not found');
-  }
-
-  const dailyRoi = parseFloat(investment.dailyRoiAmount);
-  const totalPaid = parseFloat(investment.totalRoiPaid);
-  const roiCap = parseFloat(investment.totalRoiCap);
-
-  // Check if ROI cap reached
-  if (totalPaid >= roiCap) {
-    logger.info(`⚠️  Investment ${investment._id} reached ROI cap. Completing...`);
-    investment.status = 'completed';
-    investment.completedAt = new Date();
-    await investment.save();
-    return;
-  }
-
-  // Calculate actual ROI to pay (don't exceed cap)
-  let roiToPay = dailyRoi;
-  if (totalPaid + dailyRoi > roiCap) {
-    roiToPay = roiCap - totalPaid;
-    logger.info(`⚠️  Final ROI payment (capped): ₹${roiToPay}`);
-  }
-
-  // Save original balances for rollback
-  const originalRoiBalance = parseFloat(wallet.roiBalance);
-  const originalTotalEarnings = parseFloat(wallet.totalEarnings);
-
-  try {
-    // Generate transaction ID
-    const transactionId = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
-
-    // Create ROI transaction
-    const transaction = await Transaction.create({
-      userId: investment.userId,
-      userCode: user.userCode,
-      transactionId,
-      type: 'roi_credit_daily',
-      category: 'roi',
-      walletType: 'roi',
-      amount: roiToPay,
-      fee: 0,
-      netAmount: roiToPay,
-      balanceBefore: originalRoiBalance,
-      balanceAfter: originalRoiBalance + roiToPay,
-      status: 'completed',
-      description: `Daily ROI for investment #${investment._id.toString().slice(-6)}`,
-      metadata: {
-        investmentId: investment._id,
-        packageId: investment.packageId,
-        packageName: investment.packageName,
-        roiRate: investment.roiRate,
-        daysCompleted: investment.daysCompleted + 1,
-      },
-    });
-
-    // Create income distribution record
-    await IncomeDistribution.create({
-      userId: investment.userId,
-      sourceUserId: investment.userId,
-      incomeType: 'roi',
-      amount: roiToPay,
-      investmentId: investment._id,
-      transactionId: transaction.transactionId,
-      status: 'paid',
-      paidAt: new Date(),
-      metadata: {
-        notes: `Daily ROI - Day ${investment.daysCompleted + 1}`,
-      },
-    });
-
-    // Update wallet - CRITICAL FIX
-    wallet.roiBalance = originalRoiBalance + roiToPay;
-    wallet.totalEarnings = originalTotalEarnings + roiToPay;
-    await wallet.save();
-
-    // Update investment
-    investment.totalRoiPaid = totalPaid + roiToPay;
-    investment.daysCompleted += 1;
-    investment.nextRoiDate = this.getNextRoiDate(investment.roiFrequency);
+  async processInvestmentROI(investment) {
+    // Extract userId (handle both populated and unpopulated cases)
+    const userId = investment.userId._id || investment.userId;
     
-    // Add to distribution history
-    investment.roiDistributions.push({
-      date: new Date(),
-      amount: roiToPay,
-      transactionId: transaction._id,
-    });
+    const user = await User.findById(userId);
+    const wallet = await Wallet.findOne({ userId });
 
-    // Check if completed after this payment
-    if (investment.totalRoiPaid >= investment.totalRoiCap) {
+    if (!user) {
+      logger.error(`❌ User not found for investment ${investment._id}`);
+      logger.error(`   userId: ${userId}`);
+      throw new Error(`User not found: ${userId}`);
+    }
+
+    if (!wallet) {
+      logger.error(`❌ Wallet not found for user ${user.userCode}`);
+      throw new Error(`Wallet not found for user ${user.userCode}`);
+    }
+
+    const dailyRoi = parseFloat(investment.dailyRoiAmount);
+    const totalPaid = parseFloat(investment.totalRoiPaid || 0);
+    const roiCap = parseFloat(investment.totalRoiCap);
+
+    // Check if ROI cap reached
+    if (totalPaid >= roiCap) {
+      logger.info(`⚠️  Investment ${investment._id} reached ROI cap. Completing...`);
       investment.status = 'completed';
       investment.completedAt = new Date();
-      logger.info(`🎉 Investment ${investment._id} completed! Total paid: ₹${investment.totalRoiPaid}`);
+      await investment.save();
+      return;
     }
 
-    // Check maturity date
-    if (new Date() >= investment.maturityDate) {
-      investment.status = 'matured';
-      investment.completedAt = new Date();
-      logger.info(`🎉 Investment ${investment._id} matured!`);
+    // Calculate actual ROI to pay (don't exceed cap)
+    let roiToPay = dailyRoi;
+    if (totalPaid + dailyRoi > roiCap) {
+      roiToPay = roiCap - totalPaid;
+      logger.info(`⚠️  Final ROI payment (capped): ₹${roiToPay}`);
     }
 
-    await investment.save();
+    // Save original balances for rollback
+    const originalRoiBalance = parseFloat(wallet.roiBalance || 0);
+    const originalTotalEarnings = parseFloat(wallet.totalEarnings || 0);
 
-    logger.info(`✅ ROI paid: ₹${roiToPay} to ${user.userCode} (Investment: ${investment._id.toString().slice(-8)})`);
-    logger.info(`   New balances - ROI: ₹${wallet.roiBalance}, Total Earnings: ₹${wallet.totalEarnings}`);
+    try {
+      // Generate transaction ID
+      const transactionId = `ROI${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
-  } catch (error) {
-    // Rollback on error
-    wallet.roiBalance = originalRoiBalance;
-    wallet.totalEarnings = originalTotalEarnings;
-    await wallet.save();
-    logger.error(`❌ Transaction failed, rolled back: ${error.message}`);
-    throw error;
+      // Create ROI transaction
+      const transaction = await Transaction.create({
+        userId: userId,
+        userCode: user.userCode,
+        transactionId,
+        type: 'roi_credit_daily',
+        category: 'roi',
+        walletType: 'roi',
+        amount: roiToPay,
+        fee: 0,
+        netAmount: roiToPay,
+        balanceBefore: originalRoiBalance,
+        balanceAfter: originalRoiBalance + roiToPay,
+        status: 'completed',
+        description: `Daily ROI for investment #${investment._id.toString().slice(-6)}`,
+        metadata: {
+          investmentId: investment._id,
+          packageId: investment.packageId,
+          packageName: investment.packageName || 'N/A',
+          roiRate: investment.roiRate,
+          daysCompleted: investment.daysCompleted + 1,
+        },
+      });
+
+      // Create income distribution record
+      await IncomeDistribution.create({
+        userId: userId,
+        sourceUserId: userId,
+        incomeType: 'roi',
+        amount: roiToPay,
+        investmentId: investment._id,
+        transactionId: transaction.transactionId,
+        status: 'paid',
+        paidAt: new Date(),
+        metadata: {
+          notes: `Daily ROI - Day ${investment.daysCompleted + 1}`,
+        },
+      });
+
+      // Update wallet
+      wallet.roiBalance = originalRoiBalance + roiToPay;
+      wallet.totalEarnings = originalTotalEarnings + roiToPay;
+      await wallet.save();
+
+      // Update investment
+      investment.totalRoiPaid = totalPaid + roiToPay;
+      investment.daysCompleted += 1;
+      investment.nextRoiDate = this.getNextRoiDate(investment.roiFrequency);
+      
+      // Add to distribution history
+      investment.roiDistributions.push({
+        date: new Date(),
+        amount: roiToPay,
+        transactionId: transaction.transactionId,
+      });
+
+      // Check if completed after this payment
+      if (investment.totalRoiPaid >= investment.totalRoiCap) {
+        investment.status = 'completed';
+        investment.completedAt = new Date();
+        logger.info(`🎉 Investment ${investment._id} completed! Total paid: ₹${investment.totalRoiPaid}`);
+      }
+
+      // Check maturity date
+      if (investment.maturityDate && new Date() >= investment.maturityDate) {
+        investment.status = 'completed';
+        investment.completedAt = new Date();
+        logger.info(`🎉 Investment ${investment._id} matured!`);
+      }
+
+      await investment.save();
+
+      logger.info(`✅ ROI paid: ₹${roiToPay} to ${user.userCode} (Investment: ${investment._id.toString().slice(-8)})`);
+      logger.info(`   New balances - ROI: ₹${wallet.roiBalance}, Total Earnings: ₹${wallet.totalEarnings}`);
+
+    } catch (error) {
+      // Rollback on error
+      wallet.roiBalance = originalRoiBalance;
+      wallet.totalEarnings = originalTotalEarnings;
+      await wallet.save();
+      logger.error(`❌ Transaction failed, rolled back: ${error.message}`);
+      throw error;
+    }
   }
-}
-
 
   // Calculate next ROI date based on frequency
   getNextRoiDate(frequency) {

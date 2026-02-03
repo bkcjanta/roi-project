@@ -383,8 +383,14 @@ userSchema.methods.getUplineAtLevel = function (level) {
 // ==================== VIRTUAL FIELDS ====================
 
 // Full name string
-userSchema.virtual('fullNameString').get(function () {
-  return `${this.fullName.firstName} ${this.fullName.middleName || ''} ${this.fullName.lastName}`.trim();
+userSchema.virtual('fullNameString').get(function() {
+  const parts = [
+    this.fullName.firstName,
+    this.fullName.middleName,
+    this.fullName.lastName
+  ].filter(Boolean); // Remove empty strings
+  
+  return parts.join(' ');
 });
 
 // ✅ NEW: Binary position display

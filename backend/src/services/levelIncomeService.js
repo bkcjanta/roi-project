@@ -3,30 +3,70 @@ const User = require('../models/User');
 const Commission = require('../models/Commission');
 const Wallet = require('../models/Wallet');
 const Transaction = require('../models/Transaction');
+const Investment = require('../models/Investment');
 const SettingsHelper = require('../utils/settingsHelper');
 const logger = require('../utils/logger');
 
 class LevelIncomeService {
 
   /**
+   * Check if upline is eligible for commission
+   * Upline MUST have active investment
+   * @param {ObjectId} uplineUserId - Upline user ID
+   * @returns {Boolean} Eligibility status
+   */
+  async checkUplineEligibility(uplineUserId) {
+    try {
+      // Check: Does upline have active investment?
+      const activeInvestment = await Investment.findOne({
+        userId: uplineUserId,
+        status: 'active',
+      }).select('_id');
+
+      if (activeInvestment) {
+        logger.info(`✅ Upline ${uplineUserId} eligible: Has active investment`);
+        return true;
+      }
+
+      logger.info(`❌ Upline ${uplineUserId} NOT eligible: No active investment`);
+      return false;
+
+    } catch (error) {
+      logger.error('Check upline eligibility error:', error);
+      return false;
+    }
+  }
+
+  /**
    * Create commission records when investment happens
    * Uses pre-built uplineChain for SUPER FAST calculation
    * Records created atomically with investment (same transaction)
+   * ✅ SKIPS LEVEL 1 (already paid as direct referral instant)
    * @param {Object} investment - Investment object
    * @param {Object} session - Mongoose session for transaction
-   * @param {Array} levelConfig - Level configuration
+   * @param {Array} levelConfig - Level configuration (optional)
    * @returns {Array} Created commission records
    */
-  async createCommissionRecords(investment, session, levelConfig) {
+  async createCommissionRecords(investment, session, levelConfig = null) {
     try {
       logger.info(`💰 Creating level income commissions for investment ${investment._id}`);
+
+      // Default level config if not provided
+      if (!levelConfig) {
+        levelConfig = [
+          { level: 1, percentage: 10 },  // Only for fallback
+          { level: 2, percentage: 5 },
+          { level: 3, percentage: 3 },
+          { level: 4, percentage: 2 },
+          { level: 5, percentage: 1 },
+        ];
+      }
 
       const commissions = [];
       
       // Get investor with pre-built upline chain
       const investor = await User.findById(investment.userId)
-        .select('uplineChain userCode')
-        .session(session);
+        .select('uplineChain userCode');
 
       if (!investor || !investor.uplineChain || investor.uplineChain.length === 0) {
         logger.info('⚠️ No upline chain found');
@@ -35,8 +75,15 @@ class LevelIncomeService {
 
       logger.info(`Found ${investor.uplineChain.length} upline levels`);
 
-      // Loop through pre-built upline (SUPER FAST - No recursive queries!)
+      // Loop through pre-built upline chain
       for (const upline of investor.uplineChain) {
+        
+        // ✅✅✅ SKIP LEVEL 1 - Already paid as direct referral instant ✅✅✅
+        if (upline.level === 1) {
+          logger.info(`⏭️  Skipping Level 1 (${upline.userCode}) - Already paid as direct referral (10% instant)`);
+          continue;
+        }
+        
         const levelInfo = levelConfig.find(l => l.level === upline.level);
         
         if (!levelInfo) {
@@ -44,11 +91,26 @@ class LevelIncomeService {
           continue;
         }
 
+        // ✅ CHECK ELIGIBILITY: Must have active investment
+        const isEligible = await this.checkUplineEligibility(upline.userId);
+        
+        if (!isEligible) {
+          logger.warn(`⚠️ Upline ${upline.userCode} (Level ${upline.level}) has NO ACTIVE INVESTMENT - Skipping commission`);
+          continue;
+        }
+
         // Calculate commission amount
         const commissionAmount = (parseFloat(investment.amount) * levelInfo.percentage) / 100;
 
-        // Create commission record (within same transaction as investment)
-        const commission = await Commission.create([{
+        // Generate commission ID
+        const commissionId = `COM-${Date.now().toString(36).toUpperCase()}${Math.random()
+          .toString(36)
+          .substring(2, 6)
+          .toUpperCase()}`;
+
+        // Create commission record
+        const commissionData = {
+          commissionId: commissionId,
           userId: upline.userId,
           userCode: upline.userCode,
           fromUserId: investor._id,
@@ -60,15 +122,20 @@ class LevelIncomeService {
           sourceType: 'investment',
           sourceId: investment._id,
           sourceAmount: investment.amount,
-          status: 'approved', // Auto-approved, ready for payment
-        }], { session });
+          status: 'approved',
+        };
 
-        commissions.push(commission[0]);
+        // Handle with or without session
+        const commission = session
+          ? await Commission.create([commissionData], { session })
+          : await Commission.create(commissionData);
 
-        logger.info(`✅ Level ${upline.level} commission: ₹${commissionAmount} for ${upline.userCode}`);
+        commissions.push(session ? commission[0] : commission);
+
+        logger.info(`✅ Level ${upline.level} commission: ₹${commissionAmount} for ${upline.userCode} (${levelInfo.percentage}%)`);
       }
 
-      logger.info(`🎉 Created ${commissions.length} level income commissions`);
+      logger.info(`🎉 Created ${commissions.length} level income commissions (Level 2-5 only)`);
 
       return commissions;
 
@@ -92,8 +159,8 @@ class LevelIncomeService {
       const pendingCommissions = await Commission.find({
         type: 'level',
         status: 'approved',
-        transactionId: { $exists: false },
-      }).limit(100); // Process in batches
+        paidAt: { $exists: false },
+      }).limit(100);
 
       if (pendingCommissions.length === 0) {
         logger.info('✅ No pending commissions to process');
@@ -106,6 +173,18 @@ class LevelIncomeService {
 
       for (const commission of pendingCommissions) {
         try {
+          // RE-CHECK ELIGIBILITY before payment
+          const isEligible = await this.checkUplineEligibility(commission.userId);
+          
+          if (!isEligible) {
+            logger.warn(`⚠️ User ${commission.userCode} no longer eligible - Marking as rejected`);
+            commission.status = 'rejected';
+            commission.rejectionReason = 'No active investment at time of payment';
+            await commission.save();
+            failed++;
+            continue;
+          }
+
           const result = await this.creditCommission(commission);
           
           if (result.success) {
@@ -144,7 +223,7 @@ class LevelIncomeService {
 
     try {
       // Double-check if already paid
-      if (commission.transactionId) {
+      if (commission.paidAt) {
         logger.info(`Commission ${commission.commissionId} already paid`);
         await session.abortTransaction();
         return { success: true, alreadyPaid: true };
@@ -158,42 +237,52 @@ class LevelIncomeService {
       }
 
       const amount = parseFloat(commission.amount);
+      const oldLevelBalance = parseFloat(wallet.levelBalance || 0);
+      const newLevelBalance = oldLevelBalance + amount;
 
       // Update wallet
-      wallet.levelBalance += amount;
-      wallet.totalLevelIncome += amount;
-      wallet.totalEarnings += amount;
+      wallet.levelBalance = newLevelBalance;
+      wallet.totalLevelIncome = parseFloat(wallet.totalLevelIncome || 0) + amount;
+      wallet.totalEarnings = parseFloat(wallet.totalEarnings || 0) + amount;
       await wallet.save({ session });
 
+      // Generate transaction ID
+      const txnId = `LVL${Date.now()}${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
       // Create transaction
-      const transaction = await Transaction.create([{
+      const transactionData = {
+        transactionId: txnId,
         userId: commission.userId,
         userCode: commission.userCode,
         type: 'level_income',
         amount: amount,
+        fee: 0,
+        netAmount: amount,
         walletType: 'level',
-        balanceBefore: wallet.levelBalance - amount,
-        balanceAfter: wallet.levelBalance,
+        balanceBefore: oldLevelBalance,
+        balanceAfter: newLevelBalance,
         status: 'completed',
-        description: `Level ${commission.level} income from ${commission.fromUserCode}`,
         metadata: {
           commissionId: commission._id,
           fromUserId: commission.fromUserId,
+          fromUserCode: commission.fromUserCode,
           level: commission.level,
           sourceAmount: parseFloat(commission.sourceAmount),
           percentage: commission.percentage,
         },
-      }], { session });
+      };
+
+      const transaction = await Transaction.create([transactionData], { session });
 
       // Update commission
       commission.status = 'paid';
       commission.paidAt = new Date();
-      commission.transactionId = transaction[0]._id;
+      commission.transactionId = txnId;
       await commission.save({ session });
 
       await session.commitTransaction();
       
-      logger.info(`✅ Commission credited: ₹${amount} to ${commission.userCode}`);
+      logger.info(`✅ Commission credited: ₹${amount} to ${commission.userCode} (Level ${commission.level})`);
 
       return { success: true, transaction: transaction[0] };
 
@@ -327,7 +416,6 @@ class LevelIncomeService {
 
   /**
    * Check if user is eligible for commission
-   * (Optional: Can add rules like "must have active investment")
    * @param {String} userId - User ID
    * @returns {Boolean} Eligibility status
    */
@@ -339,15 +427,8 @@ class LevelIncomeService {
         return false;
       }
 
-      // Optional: Check if user has active investment
-      // const Investment = require('../models/Investment');
-      // const activeInvestment = await Investment.findOne({
-      //   userId: userId,
-      //   status: 'active',
-      // });
-      // return !!activeInvestment;
-
-      return true;
+      // Use the upline eligibility check
+      return await this.checkUplineEligibility(userId);
 
     } catch (error) {
       logger.error('Check eligibility error:', error);
